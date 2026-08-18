@@ -21,11 +21,22 @@ class PointerSpec:
     #: valor somado ao ponteiro bruto para virar endereco de CPU
     base: int = 0
 
+    @property
+    def mask(self) -> int:
+        return (1 << (8 * self.width)) - 1
+
     def decode(self, raw: bytes) -> int:
         return int.from_bytes(raw, self.endian) + self.base
 
     def encode(self, cpu_addr: int) -> bytes:
-        return (cpu_addr - self.base).to_bytes(self.width, self.endian)
+        """Enderecos que nao cabem na largura sao truncados.
+
+        Um ponteiro de 2 bytes num console de 24 bits guarda so o deslocamento
+        dentro do banco -- o banco vem de outro lugar (registrador, tabela
+        paralela ou constante no codigo). Truncar aqui e o comportamento certo;
+        quem monta a tabela e que precisa saber de qual banco ela fala.
+        """
+        return ((cpu_addr - self.base) & self.mask).to_bytes(self.width, self.endian)
 
 
 @dataclass

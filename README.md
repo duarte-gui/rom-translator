@@ -18,13 +18,21 @@ só produz patches que o usuário aplica na própria cópia.
 - **Plugins de plataforma**: SNES (LoROM/HiROM/ExHiROM, com cálculo e correção do checksum interno),
   NES (iNES/NES 2.0), GBA, e um fallback genérico.
 - **CLI**: `identify`, `apply`, `patch`, `inspect`.
-- **CLI**: `identify`, `apply`, `patch`, `inspect`, `scan`, `dump`, `preview`.
+- **CLI**: `identify`, `apply`, `patch`, `inspect`, `scan`, `dump`, `preview`, `verify`, `pointers`, `translate`, `build`.
 - **Tabela de caracteres** `.tbl` com suporte a DTE/MTE, e a garantia de que
   `decode` e `encode` são inversas exatas — byte sem mapeamento vira `[$XX]` e volta igual.
 - **Descoberta automática do alfabeto**, sem tabela prévia: cada um dos 231 alfabetos possíveis é
   testado por quantas *palavras reais* produz. O certo se separa por larga margem.
 - **Detecção de blocos de texto** pela assinatura estatística do espaçamento entre palavras.
-- 182 testes, incluindo fuzz de round-trip dos dois formatos de patch.
+- **Descoberta de tabelas de ponteiros**, com o filtro estrutural que separa sinal de ruído:
+  passo constante, alvos em ordem crescente e um mínimo de ponteiros seguidos.
+- **Reinserção conservadora**: cabe → escreve; sobra → completa com espaço; não cabe → **não escreve**
+  e reporta. Uma linha em inglês é melhor que uma ROM que trava depois de duas horas de jogo.
+- **Motores de tradução plugáveis**: Claude (saída estruturada, cache de prompt, glossário),
+  Ollama local, e `dummy` para exercitar o pipeline sem gastar token.
+- **Códigos de controle como tokens opacos** — `[END]`, `[LINE]`, `[$1F]` viram marcadores
+  numerados antes de chegar ao modelo. O LLM nunca vê nem inventa um byte de controle.
+- 204 testes, incluindo fuzz de round-trip dos dois formatos de patch.
 
 ## Uso
 
@@ -37,6 +45,12 @@ romtrans patch    jogo.smc jogo-ptbr.smc -o traducao.bps
 romtrans scan     jogo.smc -o projeto.yaml     # acha os blocos de texto e deduz o alfabeto
 romtrans dump     projeto.yaml -o script.json  # extrai as unidades de texto
 romtrans preview  script.json --longest        # amostra do que foi extraído
+
+romtrans verify   projeto.yaml script.json     # o dump volta byte-idêntico?
+romtrans pointers projeto.yaml script.json -o script.json   # acha os ponteiros
+romtrans translate script.json --engine claude --to pt-BR --glossary g.yaml --notify
+romtrans build    projeto.yaml script.json -o traduzida.smc
+romtrans patch    jogo.smc traduzida.smc -o traducao.bps
 ```
 
 ### O que o `scan` faz sozinho
@@ -83,7 +97,14 @@ Resultado atual:
 5. alfabeto deduzido sem tabela prévia: 0xEF / 0xBA / 0xA0        OK
 ```
 
-### Um limite honesto
+### Limites honestos
+
+**Sem repointing (M4).** Hoje a tradução precisa caber no espaço da original. Se não couber, o
+`build` **recusa** aquela linha e diz de quantos bytes precisaria — em vez de escrever por cima da
+string seguinte. Mover a string e reajustar quem apontava para ela é o próximo passo; a descoberta
+de ponteiros que isso exige já está pronta.
+
+
 
 O diálogo do Chrono Trigger usa **DTE/MTE** — bytes que representam pares e trechos de palavras — e
 a tabela DTE do jogo não é recuperável de forma genérica (depende do descompressor de cada jogo). O
@@ -97,10 +118,10 @@ menus, títulos de capítulo) sai completo.
 |---|---|---|
 | **M0** | container de ROM, IPS/BPS ler+escrever, plugins de plataforma, CLI | ✅ |
 | **M1** | tabela de caracteres (`.tbl` com DTE/MTE), relative search, detecção de blocos de texto, `scan`/`dump` | ✅ |
-| **M2** | descoberta de tabelas de ponteiros, reinserção, `build`. *Critério inegociável:* `dump` + `build` sem alterar texto tem que gerar uma ROM **byte-idêntica** | — |
-| **M3** | motores de tradução plugáveis (Claude, Ollama, DeepL, `dummy`), glossário e memória de tradução | — |
-| **M4** | repointing, expansão de ROM e geração do patch final | — |
-| **M5** | consolidar os plugins NES e GBA no pipeline completo | — |
+| **M2** | descoberta de tabelas de ponteiros, reinserção, `build`. *Critério inegociável:* `dump` + `build` sem alterar texto gera uma ROM **byte-idêntica** | ✅ |
+| **M3** | motores de tradução plugáveis (Claude, Ollama, `dummy`), glossário e memória de tradução | ✅ |
+| **M4** | geração do patch final ✅ · **repointing e expansão de ROM ainda não** | parcial |
+| **M5** | plugins NES e GBA (detecção, mapeamento e ponteiros testados; ainda não exercitados ponta a ponta numa ROM real) | parcial |
 
 ## Princípios de projeto
 
@@ -128,12 +149,37 @@ menus, títulos de capítulo) sai completo.
 O espaço vazio: multi-plataforma por plugin **+** descoberta automática de tabela/ponteiros **+** LLM com
 provedor plugável **+** saída em patch. É o que o romtrans persegue.
 
+## O pipeline completo, verificado
+
+Com `--engine dummy`, sem gastar um token, no Chrono Trigger real:
+
+```
+ROM → scan → dump → translate → build → patch → apply → byte-idêntico à ROM construída
+```
+
+E o marco de segurança do M2, que autoriza tudo o que vem depois:
+
+```
+$ romtrans verify ct.yaml ct-script.json
+ok 6.116 unidades sobrevivem ao round-trip intactas
+
+$ romtrans build ct.yaml ct-script.json -o rebuild.smc   # sem nenhuma tradução
+$ cmp "Chrono Trigger (U) [!].smc" rebuild.smc            # idêntica, byte a byte
+```
+
+Se `encode(decode(bytes))` não devolvesse os mesmos bytes, qualquer tradução construída em cima
+corromperia a ROM em algum ponto que só apareceria horas depois de jogo.
+
 ## Desenvolvimento
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest
 ```
+
+Para usar o motor Claude, a chave vai em `~/.config/secrets/anthropic.env` (mode 600) como
+`ANTHROPIC_API_KEY=...`, ou na variável de ambiente. Rodadas longas aceitam `--notify`, que avisa
+no Telegram ao terminar.
 
 ## Licença e ROMs
 

@@ -168,6 +168,10 @@ class Table:
             return False
         return True
 
+    def bytes_for(self, text: str) -> bytes | None:
+        """Sequencia de bytes que representa `text`, ou None se nao houver."""
+        return self._reverse.get(text)
+
     @property
     def letter_bytes(self) -> set[int]:
         """Bytes de 1 byte que mapeiam para texto imprimivel -- usado pelo scanner."""

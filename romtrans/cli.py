@@ -11,6 +11,9 @@ from rich.table import Table as RichTable
 
 from . import platforms
 from .core.patch import apply_bps, apply_ips, create_bps, create_ips, detect_format
+from . import engines as engine_registry
+from .core.insert import insert, verify_roundtrip
+from .core.pointers import find_pointers
 from .core.rom import Rom
 from .core.scanner import find_text_regions, guess_alphabet, looks_like_language
 from .core.script import Script
@@ -272,6 +275,258 @@ def preview(script_path: Path, count: int, longest: bool) -> None:
         view.add_row(f"0x{unit.offset:06X}", str(unit.max_len), unit.text)
     console.print(view)
     console.print(f"[dim]{script.stats()['unidades']:,} unidades no total[/dim]")
+
+
+def _load_all(project_path: Path, script_path: Path, rom_override: Path | None):
+    project = Project.load(project_path)
+    rom = Rom.load(rom_override or project.rom_path)
+    if rom.sha1() != project.rom_sha1:
+        console.print("[yellow]aviso[/yellow] a ROM nao e a mesma registrada no projeto")
+    table = project.load_table(project_path.parent)
+    script = Script.load(script_path)
+    return project, rom, table, script
+
+
+@main.command()
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("script_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
+def verify(project_path: Path, script_path: Path, rom_override: Path | None) -> None:
+    """Confere que reinserir o texto original nao altera um byte da ROM.
+
+    E o teste que autoriza tudo o que vem depois: se a tabela for ambigua, uma
+    traducao construida sobre ela corrompe a ROM sem avisar.
+    """
+    _, rom, table, script = _load_all(project_path, script_path, rom_override)
+    broken = verify_roundtrip(rom, script, table)
+    total = len(script.units)
+    if not broken:
+        console.print(f"[green]ok[/green] {total:,} unidades sobrevivem ao round-trip intactas")
+        return
+    console.print(
+        f"[red]{len(broken):,} de {total:,} unidades nao voltam iguais[/red] "
+        f"({len(broken) / total:.1%})"
+    )
+    for unit in broken[:10]:
+        console.print(f"  [dim]0x{unit.offset:06X}[/dim] {unit.text!r}")
+    sys.exit(1)
+
+
+@main.command()
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("script_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", required=True, type=click.Path(path_type=Path))
+@click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
+@click.option("--allow-overflow", is_flag=True,
+              help="segue mesmo com traducoes que nao cabem (elas ficam no original)")
+def build(project_path: Path, script_path: Path, output: Path,
+          rom_override: Path | None, allow_overflow: bool) -> None:
+    """Reinsere as traducoes e grava a ROM traduzida."""
+    _, rom, table, script = _load_all(project_path, script_path, rom_override)
+    plugin, det = platforms.identify(rom.data)
+
+    before = bytes(rom.data)
+    report = insert(rom, script, table)
+
+    if det.platform == "snes" and bytes(rom.data) != before:
+        from .platforms.snes import fix_checksum
+
+        fix_checksum(rom.data, det.details["header_offset"])
+
+    console.print(
+        f"escritas {report.written:,} unidades"
+        + (f", {report.skipped_untranslated:,} ainda sem traducao"
+           if report.skipped_untranslated else "")
+    )
+    if report.overflow:
+        console.print(f"[yellow]{len(report.overflow):,} traducoes nao couberam:[/yellow]")
+        for unit, size in report.overflow[:8]:
+            console.print(
+                f"  [dim]0x{unit.offset:06X}[/dim] precisa de {size} bytes, cabe {unit.max_len}"
+                f"  {unit.translation!r}"
+            )
+        if not allow_overflow:
+            _fail("use --allow-overflow para gerar assim mesmo, ou encurte as traducoes")
+    for unit, message in report.failed[:8]:
+        console.print(f"  [red]0x{unit.offset:06X}[/red] {message}")
+
+    rom.save(output)
+    console.print(f"[green]ok[/green] ROM gravada em {output} (crc32 {rom.crc32():08x})")
+
+
+@main.command()
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("script_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path),
+              help="grava o script anotado com os ponteiros encontrados")
+@click.option("--min-run", default=8, show_default=True,
+              help="quantos ponteiros seguidos uma tabela precisa ter para valer")
+@click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
+def pointers(project_path: Path, script_path: Path, output: Path | None,
+             min_run: int, rom_override: Path | None) -> None:
+    """Procura as tabelas de ponteiros que endereçam o texto extraido."""
+    _, rom, _table, script = _load_all(project_path, script_path, rom_override)
+    plugin, det = platforms.identify(rom.data)
+    targets = {unit.offset: unit.id for unit in script.units}
+
+    found = []
+    for spec in plugin.pointer_specs(det):
+        tables = find_pointers(bytes(rom.data), targets, plugin, det, spec, min_run=min_run)
+        for table in tables:
+            found.append((spec, table))
+        console.print(f"{spec.name}: {len(tables)} tabelas")
+
+    by_target: dict[int, list[int]] = {}
+    for _spec, table in found:
+        for pointer_offset, target in table.entries.items():
+            by_target.setdefault(target, []).append(pointer_offset)
+    for unit in script.units:
+        unit.pointers = sorted(by_target.get(unit.offset, []))
+
+    covered = sum(1 for unit in script.units if unit.pointers)
+    console.print(
+        f"[green]ok[/green] {len(found)} tabelas, {covered:,} de {len(script.units):,} "
+        f"unidades com ponteiro conhecido ({covered / max(len(script.units), 1):.1%})"
+    )
+    for _spec, table in sorted(found, key=lambda item: -item[1].count)[:8]:
+        console.print(
+            f"  [dim]0x{table.offset:06X}[/dim] {table.count:4d} ponteiros de "
+            f"{table.spec.width} bytes"
+        )
+    if output:
+        script.save(output)
+        console.print(f"script anotado gravado em {output}")
+
+
+def _notify_telegram(message: str) -> None:
+    """Avisa no Telegram ao fim de uma rodada longa, se as credenciais existirem."""
+    env = Path.home() / ".config" / "secrets" / "telegram.env"
+    if not env.exists():
+        return
+    values = {}
+    for line in env.read_text(encoding="utf-8").splitlines():
+        line = line.strip().removeprefix("export ").strip()
+        if "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip("'\"")
+    token, chat = values.get("TELEGRAM_BOT_TOKEN"), values.get("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        return
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode({"chat_id": chat, "text": message}).encode()
+    try:
+        urllib.request.urlopen(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=data, timeout=15
+        )
+    except Exception:  # notificacao nunca deve derrubar a traducao
+        console.print("[dim]nao consegui avisar no Telegram[/dim]")
+
+
+@main.command()
+@click.argument("script_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path),
+              help="onde gravar (padrao: sobrescreve o proprio script)")
+@click.option("-e", "--engine", "engine_name", default="dummy", show_default=True,
+              type=click.Choice(sorted(engine_registry.ENGINES)))
+@click.option("--to", "target_lang", default="pt-BR", show_default=True)
+@click.option("--game", default="", help="nome do jogo, dado como contexto ao motor")
+@click.option("--glossary", type=click.Path(exists=True, path_type=Path),
+              help="YAML com 'original: traducao' -- nomes proprios, itens, lugares")
+@click.option("--batch-size", default=40, show_default=True)
+@click.option("--limit", type=int, help="traduz so as N primeiras unidades (teste barato)")
+@click.option("--retranslate", is_flag=True, help="refaz o que ja estava traduzido")
+@click.option("--notify", is_flag=True, help="avisa no Telegram ao terminar")
+def translate(script_path: Path, output: Path | None, engine_name: str, target_lang: str,
+              game: str, glossary: Path | None, batch_size: int, limit: int | None,
+              retranslate: bool, notify: bool) -> None:
+    """Traduz as unidades de um script com o motor escolhido."""
+    import time
+
+    from .engines.base import TranslationRequest, mask_controls, unmask_controls
+
+    script = Script.load(script_path)
+    output = output or script_path
+
+    words: dict[str, str] = {}
+    if glossary:
+        import yaml
+
+        words = {str(k): str(v) for k, v in (yaml.safe_load(glossary.read_text()) or {}).items()}
+
+    config = engine_registry.EngineConfig(
+        target_lang=target_lang, game=game, glossary=words, batch_size=batch_size
+    )
+    try:
+        engine = engine_registry.build(engine_name, config)
+    except Exception as exc:
+        _fail(f"nao consegui iniciar o motor {engine_name!r}: {exc}")
+
+    pending = [u for u in script.units if retranslate or not u.translated]
+    if limit:
+        pending = pending[:limit]
+    if not pending:
+        console.print("nada a traduzir")
+        return
+
+    # memoria de traducao: texto identico so vai uma vez ao motor
+    memory = {u.text: u.translation for u in script.units if u.translated}
+    reused = 0
+    to_send = []
+    for unit in pending:
+        cached = memory.get(unit.text)
+        if cached is not None and not retranslate:
+            unit.translation = cached
+            reused += 1
+        else:
+            to_send.append(unit)
+
+    console.print(
+        f"motor [cyan]{engine_name}[/cyan] -> {target_lang}: {len(to_send):,} unidades "
+        f"em lotes de {batch_size}" + (f", {reused:,} reaproveitadas da memoria" if reused else "")
+    )
+
+    started = time.time()
+    done = failed = 0
+    with console.status("traduzindo...") as status:
+        for start in range(0, len(to_send), batch_size):
+            chunk = to_send[start : start + batch_size]
+            masked = []
+            tokens_by_id = {}
+            for unit in chunk:
+                masked_text, tokens = mask_controls(unit.text)
+                tokens_by_id[unit.id] = tokens
+                masked.append(
+                    TranslationRequest(id=unit.id, text=masked_text, max_chars=unit.max_len)
+                )
+            try:
+                results = engine.translate_batch(masked)
+            except Exception as exc:  # rede, cota, timeout
+                console.print(f"[yellow]lote falhou:[/yellow] {exc}")
+                failed += len(chunk)
+                continue
+            for unit, result in zip(chunk, results):
+                if result.text is None:
+                    failed += 1
+                    unit.note = result.note
+                    continue
+                unit.translation = unmask_controls(result.text, tokens_by_id[unit.id])
+                memory[unit.text] = unit.translation
+                done += 1
+            status.update(f"traduzindo... {done + failed:,}/{len(to_send):,}")
+
+    engine.close()
+    script.save(output)
+    elapsed = time.time() - started
+    summary = (
+        f"traducao concluida: {done:,} unidades em {elapsed / 60:.1f} min"
+        + (f", {reused:,} da memoria" if reused else "")
+        + (f", {failed:,} falharam" if failed else "")
+    )
+    console.print(f"[green]ok[/green] {summary} -> {output}")
+    if notify:
+        _notify_telegram(f"romtrans: {summary}\narquivo: {output}")
 
 
 if __name__ == "__main__":

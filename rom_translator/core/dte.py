@@ -217,6 +217,7 @@ def infer_dte(
     min_hits: int = 8,
     min_confidence: float = 0.60,
     rounds: int = 6,
+    max_words: int = 5000,
 ) -> list[DteGuess]:
     """Deduz o que cada byte desconhecido representa. Ordenado por confianca.
 
@@ -232,6 +233,12 @@ def infer_dte(
     """
     words = _split_words(data, regions, table, space)
     lexicon = lexicon or set()
+
+    # o custo cresce com palavras x tamanho do lexico x alinhamentos, e a analise
+    # completa de uma ROM de 4 MiB nao termina em tempo util. As palavras curtas
+    # sao as que mais casam com tudo e menos informam: a amostra fica com as longas.
+    if len(words) > max_words:
+        words = sorted(words, key=lambda w: -len(w.parts))[:max_words]
     frequency = Counter(b for word in words for b in word.unknowns)
     resolved: dict[int, str] = {}
     guesses: dict[int, DteGuess] = {}

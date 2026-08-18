@@ -270,6 +270,15 @@ tradução inteira.
 Medido contra uma tabela conhecida (texto real do Dragon Warrior, compressão sintética de 16
 entradas): **7 recuperadas, 0 erradas**. Recall parcial, precisão total — o trade-off certo.
 
+Nas ROMs reais, dois resultados, e nenhum deles é uma vitória:
+
+- **Dragon Warrior**: nenhuma proposta. É o resultado **certo** — o texto não é comprimido, não há
+  tabela a recuperar, e o algoritmo cala em vez de inventar.
+- **Chrono Trigger**: nenhuma proposta. É um **não-resultado**. O esquema de compressão do jogo
+  provavelmente não é DTE simples, e a amostra que talvez bastasse não termina em tempo útil — o
+  custo cresce com palavras × léxico × alinhamentos, e 20 mil palavras já passam de dois minutos
+  numa ROM de 4 MiB. Continua precisando de um `.tbl` fornecido.
+
 Duas versões anteriores foram descartadas por medição, não por gosto:
 
 - **Dicionário tirado da própria ROM**: partia da ideia de que "sword" apareceria inteiro em algum

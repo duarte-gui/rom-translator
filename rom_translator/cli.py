@@ -582,8 +582,11 @@ def translate(script_path: Path, output: Path | None, engine_name: str, target_l
               help="grava as propostas na tabela do projeto")
 @click.option("--min-confidence", default=0.6, show_default=True)
 @click.option("-n", "--count", default=30, show_default=True)
+@click.option("--max-words", default=5000, show_default=True,
+              help="amostra de palavras analisadas; o custo cresce muito rapido com ela")
 def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None,
-        apply_to_table: bool, min_confidence: float, count: int) -> None:
+        apply_to_table: bool, min_confidence: float, count: int,
+        max_words: int) -> None:
     """Propoe o que cada byte comprimido (DTE/MTE) representa.
 
     Sao propostas, nao certezas: confira antes de aceitar. O algoritmo so opina
@@ -611,7 +614,7 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
     with console.status("deduzindo..."):
         guesses = infer_dte(
             bytes(rom.data), regions, table, space_bytes[0], lexicon=words,
-            min_confidence=min_confidence,
+            min_confidence=min_confidence, max_words=max_words,
         )
     if not guesses:
         console.print("nenhuma proposta passou nos criterios")

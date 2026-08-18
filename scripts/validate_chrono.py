@@ -26,6 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from romtrans.core.patch import apply_bps, apply_ips, create_bps, create_ips  # noqa: E402
 from romtrans.core.rom import Rom  # noqa: E402
 from romtrans.platforms import identify  # noqa: E402
+from romtrans.core.scanner import find_text_regions, guess_alphabet  # noqa: E402
+from romtrans.core.table import Table  # noqa: E402
 from romtrans.platforms.snes import checksum_valid  # noqa: E402
 
 
@@ -98,6 +100,46 @@ def main(rom_path: str, patch_path: str) -> int:
     for start, end in biggest:
         cpu = plugin.file_to_cpu(start, det)
         print(f"    0x{start:06X} (+{end - start:3d} bytes)  cpu ${cpu:06X}")
+
+    print("\n4. scanner de texto medido contra o gabarito")
+    regions = find_text_regions(english, limits=plugin.text_regions(english, det))
+    marked = bytearray(len(english))
+    for region in regions:
+        marked[region.start : region.end] = b"\x01" * region.length
+    total_changed = hit = 0
+    for start, end in runs:
+        for offset in range(start, end):
+            total_changed += 1
+            hit += marked[offset]
+    recall = hit / total_changed if total_changed else 0.0
+    flagged = sum(r.length for r in regions) / len(english)
+    print(f"  {len(regions):,} blocos sinalizados, {flagged:.1%} da ROM")
+    results.append(
+        check(
+            f"recall de {recall:.1%} sobre as regioes que o tradutor humano alterou",
+            recall >= 0.80,
+            "-- meta do M1: 80%",
+        )
+    )
+
+    print("\n5. alfabeto deduzido sem nenhuma tabela previa")
+    guess = guess_alphabet(english, regions)
+    if guess is None:
+        results.append(check("alfabeto deduzido", False))
+    else:
+        upper = f"0x{guess.upper_base:02X}" if guess.upper_base is not None else "-"
+        print(f"  espaco=0x{guess.space:02X}  a-z=0x{guess.lower_base:02X}  A-Z={upper}")
+        print(f"  {guess.word_hits} palavras reais contra {guess.runner_up_hits} do 2o candidato")
+        results.append(
+            check(
+                "bate com o encoding real do Chrono Trigger",
+                (guess.space, guess.lower_base, guess.upper_base) == (0xEF, 0xBA, 0xA0),
+                "-- esperado espaco=0xEF a-z=0xBA A-Z=0xA0",
+            )
+        )
+        table = Table.parse(guess.as_table_source())
+        sample = table.decode(english, 0x36B870, 60, stop_at_end=False).text
+        print(f"  amostra decodificada: {sample!r}")
 
     print()
     if all(results):

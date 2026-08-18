@@ -3,7 +3,7 @@ name = "romtrans"
 version = "0.1.0"
 description = "Pipeline generico de traducao de ROMs: extrai, traduz com LLM, reinsere e gera patch"
 requires-python = ">=3.11"
-dependencies = ["click>=8.1", "rich>=13.0"]
+dependencies = ["click>=8.1", "rich>=13.0", "numpy>=1.24", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]

@@ -1,47 +1,52 @@
-# Traducao PT-BR de Dragon Warrior (NES), feita para exercitar o pipeline
-# ponta a ponta. Chave = texto original extraido da ROM; valor = traducao.
+# Traducao PT-BR de Dragon Warrior (NES), com acentos gerados por
+# `rom-translator font accents` a partir dos glifos que ja existiam na ROM.
 #
-# Sem acentos de proposito: a tabela deduzida pelo `scan` so tem a-z, A-Z e
-# espaco. Acentuar exigiria editar a fonte da ROM e estender a tabela.
-# Cada traducao cabe no espaco da original -- nenhuma precisou de realocacao.
+# A fonte tinha 2 tiles livres e sao precisos 8. Os outros 6 vieram de
+# sacrificar J, X, Y e Z -- que nao aparecem nenhuma vez no script do jogo --
+# mais F e V, que aparecem 39 vezes somadas. Essas 39 ocorrencias, em falas
+# ainda nao traduzidas, passam a mostrar uma letra acentuada no lugar.
+#
+# Ficaram de fora os circunflexos e a crase: nao havia doador para eles, e
+# algumas frases foram reescritas para nao precisar deles. 'Wynn' virou
+# 'Winn' porque o y minusculo tambem foi sacrificado.
 
-' Four steps south of the bath in Kol thou shalt find a magic item': ' Quatro passos ao sul do banho em Kol acharas um item magico'
-' I fear thou art not the one Erdrick predicted would save us': ' Temo que nao sejas o que Erdrick previu para nos salvar'
-' Travel not to the south for there the monsters are fierce and terrible': ' Nao vas ao sul pois la os monstros sao ferozes e terriveis'
-' had buried something of great value at the foot of a tree behind his shop': ' enterrou algo de grande valor ao pe de uma arvore atras de sua loja'
+' Four steps south of the bath in Kol thou shalt find a magic item': ' Quatro passos ao sul do banho em Kol acharás um item mágico'
+' I fear thou art not the one Erdrick predicted would save us': ' Temo que não sejas o que Erdrick previu para nos salvar'
+' Travel not to the south for there the monsters are fierce and terrible': ' Não vás ao sul pois lá os monstros são ferozes e terríveis'
+' had buried something of great value at the foot of a tree behind his shop': ' enterrou algo de grande valor ao pé de uma árvore atrás de sua loja'
 ' the Imperial Scroll of Honor containing your deeds may be lost': ' o Pergaminho de Honra com teus feitos pode se perder'
-' then follow the coastline west until thou hath reached Garinham': ' entao segue a costa oeste ate chegares a Garinham'
+' then follow the coastline west until thou hath reached Garinham': ' então segue a costa oeste até chegares a Garinham'
 ' thou must help us recover the Ball of Light and restore peace to our land': ' deves ajudar nos a recobrar a Esfera de Luz e trazer paz a nossa terra'
-Across the land spreads the brilliance until all shadows are banished and peace is restored: Pela terra se espalha o brilho ate que toda sombra se dissipe e a paz retorne
-'Before reaching thy next level of experience thou must gain ': 'Para o proximo nivel de experiencia deves ganhar '
+Across the land spreads the brilliance until all shadows are banished and peace is restored: Pela terra se espalha o brilho até que toda sombra se dissipe e a paz retorne
+'Before reaching thy next level of experience thou must gain ': 'Para subir de nível deves ainda ganhar '
 Bring this to me and I will reward thee with the Staff of Rain: Traz me isto e te darei o Cajado da Chuva
 Forever shall I be grateful for the gift of my daughter returned to her home: Para sempre serei grato pelo dom de minha filha devolvida ao seu lar
-Great strength and skill and wit only will bring thee back from that place: So grande forca e destreza e astucia te trarao de volta de la
+Great strength and skill and wit only will bring thee back from that place: Só grande força e destreza e astúcia te trarão de volta de lá
 Half a year now hath passed since the Princess was kidnapped by the enemy: Meio ano se passou desde que a Princesa foi raptada pelo inimigo
 I give thee now a chance to share this world and to rule half of it if thou will now stand beside me: Dou te agora a chance de dividir este mundo e de reinar sobre metade dele se ficares ao meu lado
 I suggest making a map if thy path leads into the darkness: Sugiro fazer um mapa se teu caminho levar as trevas
 If thou dies I can bring thee back for another attempt without loss of thy deeds to date: Se morreres posso trazer te de volta para nova tentativa sem perder teus feitos
 In legends it is said that fairies know how to put Golem to sleep: Lendas dizem que as fadas sabem fazer Golem dormir
-In this world is there any sword that can pierce the scales of the Dragonlord: Ha neste mundo alguma espada que perfure as escamas do Dragonlord
+In this world is there any sword that can pierce the scales of the Dragonlord: Há neste mundo alguma espada que perfure as escamas do Dragonlord
 It is said that the Princess was kidnapped and taken eastward: Dizem que a Princesa foi raptada e levada para leste
 It is told that in ages past Erdrick fought demons with a Ball of Light: Contam que em eras passadas Erdrick lutou com a Esfera de Luz
-King Lorik will record thy deeds in his Imperial Scroll so thou may return to thy quest later: O Rei Lorik registrara teus feitos no Pergaminho Imperial para que retornes depois
-Many believe that Princess Gwaelin is hidden away in a cave: Muitos creem que a Princesa Gwaelin esta numa caverna
-Many have been the warriors who have perished on this quest: Muitos guerreiros ja pereceram nesta jornada
+King Lorik will record thy deeds in his Imperial Scroll so thou may return to thy quest later: O Rei Lorik registrará teus feitos no Pergaminho Imperial para que retornes depois
+Many believe that Princess Gwaelin is hidden away in a cave: Muitos creem que a Princesa Gwaelin está numa caverna
+Many have been the warriors who have perished on this quest: Muitos guerreiros já pereceram nesta jornada
 Many of our colleagues have been killed by servants of the Dragonlord: Muitos dos nossos foram mortos por servos do Dragonlord
-My Grandfather Wynn once had a shop on the east side of Hauksness: Meu avo Wynn teve uma loja no lado leste de Hauksness
-Now I have entrusted the three items to three worthy keepers: Confiei os tres itens a tres guardioes dignos
+My Grandfather Wynn once had a shop on the east side of Hauksness: Meu velho Winn teve uma loja no lado leste de Hauksness
+Now I have entrusted the three items to three worthy keepers: Confiei os itens a guardiões dignos e valentes
 Now the sun and rain shall meet and the Rainbow Drop passes to thy keeping: Agora o sol e a chuva se encontram e a Gota do Arco Iris passa a ti
-Over the western part of this island Erdrick created a rainbow: Na parte oeste desta ilha Erdrick criou um arco iris
-Radiance streams forth as thy hands touch the object and hold it aloft: O brilho jorra quando tuas maos tocam o objeto e o erguem ao alto
-Rumor has it that entire towns have been destroyed by the Dragonlord: Dizem que vilas inteiras foram destruidas pelo Dragonlord
-Take now whatever thou may find in these Treasure Chests to aid thee in thy quest: Leva o que achares nestes Baus do Tesouro para te ajudar em tua jornada
+Over the western part of this island Erdrick created a rainbow: Na parte oeste desta ilha Erdrick criou um arco íris
+Radiance streams forth as thy hands touch the object and hold it aloft: O brilho jorra quando tuas mãos tocam o objeto e o erguem ao alto
+Rumor has it that entire towns have been destroyed by the Dragonlord: Dizem que vilas inteiras foram destruídas pelo Dragonlord
+Take now whatever thou may find in these Treasure Chests to aid thee in thy quest: Leva o que achares nestes Baús do Tesouro para te ajudar em tua jornada
 Tell King Lorik that the search for his daughter hath failed: Diz ao Rei Lorik que a busca por sua filha falhou
-Their descendants will protect the items until thy quest leads thee to seek them out: Seus descendentes guardarao os itens ate que tua jornada te leve a procura los
-Then came the Dragonlord who stole the precious globe and hid it in the darkness: Entao veio o Dragonlord que roubou a preciosa esfera e a escondeu nas trevas
-There is a Silver Harp that beckons to the creatures of the Dragonlord: Ha uma Harpa de Prata que atrai as criaturas do Dragonlord
+Their descendants will protect the items until thy quest leads thee to seek them out: Seus descendentes guardarão os itens até que tua jornada te leve a procurá los
+Then came the Dragonlord who stole the precious globe and hid it in the darkness: Então veio o Dragonlord que roubou a preciosa esfera e a escondeu nas trevas
+There is a Silver Harp that beckons to the creatures of the Dragonlord: Há uma Harpa de Prata que atrai as criaturas do Dragonlord
 Thy deeds have been recorded on the Imperial Scrolls of Honor: Teus feitos foram gravados nos Pergaminhos de Honra
-Tis also said that he entered the darkness from a hidden entrance in the room of the Dragonlord: Dizem tambem que ele entrou nas trevas por uma entrada secreta na sala do Dragonlord
+Tis also said that he entered the darkness from a hidden entrance in the room of the Dragonlord: Dizem também que ele entrou nas trevas por uma entrada secreta na sala do Dragonlord
 Tis said that the Dragonlord hath claws that can cleave iron and fiery breath that can melt stone: Dizem que o Dragonlord tem garras que rasgam ferro e um sopro de fogo que derrete pedra
 To become strong enough to face future trials thou must first battle many foes: Para ficar forte o bastante para provas futuras deves lutar contra muitos
 To learn how proof may be obtained that thy ancestor was the great Erdrick: Para saber como provar que teu ancestral foi o grande Erdrick

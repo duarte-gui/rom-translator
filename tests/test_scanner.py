@@ -2,6 +2,8 @@
 
 import random
 
+import pytest
+
 from rom_translator.core.scanner import (
     find_text_regions,
     guess_alphabet,
@@ -79,3 +81,26 @@ def test_language_filter_keeps_words_and_drops_garbage():
     assert not looks_like_language("ab")
     assert not looks_like_language("qwrtpsdfghk")  # consoantes demais
     assert not looks_like_language("aeioaeioaeia")  # vogais demais
+
+
+@pytest.mark.parametrize(
+    "lower,upper,space,arranjo",
+    [
+        (0xBA, 0xA0, 0xEF, "A-Z antes de a-z (Chrono Trigger)"),
+        (0x0A, 0x24, 0x5F, "A-Z depois de a-z (Dragon Warrior)"),
+        (0x61, 0x41, 0x20, "ASCII, com seis bytes entre 'Z' e 'a'"),
+    ],
+)
+def test_finds_uppercase_in_every_known_layout(lower, upper, space, arranjo):
+    """Os tres arranjos que os jogos usam de verdade."""
+    texto = (PROSE + PROSE.title()) * 30
+    data = bytes(
+        space if c == " "
+        else (upper + ord(c) - ord("A")) if c.isupper()
+        else (lower + ord(c) - ord("a"))
+        for c in texto
+        if c.isalpha() or c == " "
+    )
+    guess = guess_alphabet(data)
+    assert guess is not None, arranjo
+    assert (guess.lower_base, guess.upper_base, guess.space) == (lower, upper, space), arranjo

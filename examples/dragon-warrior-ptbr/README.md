@@ -35,3 +35,19 @@ editar a fonte da ROM e estender a tabela — trabalho de romhacking que a ferra
 
 Cada tradução coube no espaço da original (folga média de 9,8 bytes), então nenhuma precisou de
 realocação.
+
+## A ordem importa
+
+```bash
+rom-translator scan  "Dragon Warrior (U) (PRG1) [!].nes" -o dw.yaml --threshold 0.35 --min-length 128
+rom-translator dump  dw.yaml -o dw.json --min-chars 8          # ANTES de mexer na fonte
+rom-translator font accents dw.yaml -o DW-fonte.nes \
+    --sacrifice J,X,Y,Z,F,V,y --letters "áãçéíóõú"             # a tabela muda aqui
+python aplicar.py dw.json traducao.yaml dw-ptbr.json
+rom-translator build dw.yaml dw-ptbr.json -o "Dragon Warrior PT-BR.nes" --rom DW-fonte.nes
+rom-translator patch "Dragon Warrior (U) (PRG1) [!].nes" "Dragon Warrior PT-BR.nes" -o dw-ptbr.bps
+```
+
+O `dump` vem **antes** do `font accents`. Depois de sacrificar letras, a tabela decodifica aqueles
+bytes como acentos — e o texto original em inglês sai adulterado. Fazendo na ordem errada, `thy`
+lê-se `thá` e nenhuma tradução casa.

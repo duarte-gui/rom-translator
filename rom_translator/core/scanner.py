@@ -230,7 +230,7 @@ def guess_alphabet(
     confidence = 1.0 - runner_up / hits
 
     space = _byte_after_words(arr, lower)
-    upper = _guess_upper(arr, lower, space, floor)
+    upper = _guess_upper(arr, lower, space, floor, keys_by_length)
     return AlphabetGuess(
         space=space,
         lower_base=lower,
@@ -241,6 +241,18 @@ def guess_alphabet(
     )
 
 
+def UPPER_OFFSETS_TO_TRY(lower: int) -> tuple[int, ...]:
+    """Onde as maiusculas podem estar, dado onde estao as minusculas.
+
+    Tres arranjos cobrem o que se ve na pratica: A-Z logo antes de a-z (Chrono
+    Trigger), logo depois (Dragon Warrior), e a 32 bytes de distancia, que e o
+    ASCII -- entre 'Z' e 'a' o ASCII tem seis bytes de pontuacao, entao o passo
+    nao e 26. Castlevania de GBA guarda texto em ASCII puro e escapava dos dois
+    primeiros casos.
+    """
+    return (lower - 26, lower + 26, lower - 32)
+
+
 #: uma maiuscula precisa ser seguida por minuscula com esta folga sobre o
 #: quanto ela e *precedida* por uma. Medido em Chrono Trigger (3.0) e Dragon
 #: Warrior (6.6); a faixa de digitos, principal falso positivo, fica em 0.38
@@ -249,35 +261,49 @@ UPPER_MIN_FOLLOWED = 0.08
 
 
 def _guess_upper(
-    arr: np.ndarray, lower: int, space: int, floor: float
+    arr: np.ndarray,
+    lower: int,
+    space: int,
+    floor: float,
+    keys_by_length: dict[int, np.ndarray],
 ) -> int | None:
-    """Acha a faixa das maiusculas, que tanto pode preceder quanto seguir as minusculas.
+    """Acha a faixa das maiusculas testando qual remapeamento gera mais palavras.
 
-    A ordem das duas faixas varia por jogo: Chrono Trigger poe A-Z antes de a-z,
-    Dragon Warrior poe depois. O que nao varia e a assimetria da vizinhanca --
-    uma maiuscula abre palavra, entao vem *seguida* de minuscula muito mais do
-    que precedida por uma. E o unico sinal testado que sobrevive aos dois jogos:
-    "vem depois de espaco" falha no Dragon Warrior (a frase abre logo apos um
-    codigo de controle) e "e seguida de minuscula" sozinho falha no Chrono
-    Trigger (onde o proximo byte costuma ser um par DTE).
+    A ordem varia por jogo -- Chrono Trigger poe A-Z antes de a-z, Dragon Warrior
+    depois, e o ASCII deixa seis bytes de pontuacao no meio. Tentar as tres
+    posicoes e facil; escolher entre elas e que nao era.
+
+    A primeira versao usava a vizinhanca (maiuscula vem seguida de minuscula mais
+    do que precedida). Funciona quando as faixas sao adjacentes, mas em ASCII duas
+    janelas candidatas se sobrepoem quase inteiras e a errada chegou a pontuar
+    mais alto. O teste que decide e o mesmo das minusculas: rebaixar a faixa
+    candidata para minuscula e contar palavras reais. So o alinhamento certo
+    transforma "Soma" em "soma".
     """
     is_lower = (arr >= lower) & (arr <= lower + 25)
-    best: tuple[int, float] | None = None
-    for base in (lower - 26, lower + 26):
+    best: tuple[int, int] | None = None
+    for base in (lower - 26, lower + 26, lower - 32):
         if base < 0 or base + 25 > 255:
             continue
-        positions = np.flatnonzero((arr >= base) & (arr <= base + 25))
+        window = (arr >= base) & (arr <= base + 25)
+        positions = np.flatnonzero(window)
         positions = positions[(positions > 0) & (positions < len(arr) - 1)]
         if positions.size < max(50, floor * 4):
             continue
         preceded = float(is_lower[positions - 1].mean())
         followed = float(is_lower[positions + 1].mean())
-        if followed < UPPER_MIN_FOLLOWED or followed < preceded * UPPER_RATIO:
-            continue
-        ratio = followed / max(preceded, 1e-6)
-        if best is None or ratio > best[1]:
-            best = (base, ratio)
-    return best[0] if best else None
+        if followed < preceded:
+            continue  # nem chega a parecer inicio de palavra
+        # rebaixa a faixa candidata e conta palavras reais
+        folded = arr.copy()
+        folded[window] = folded[window] - base + lower
+        hits = _count_words(folded, lower, keys_by_length)
+        if best is None or hits > best[1]:
+            best = (base, hits)
+    if best is None:
+        return None
+    baseline = _count_words(arr, lower, keys_by_length)
+    return best[0] if best[1] > baseline else None
 
 
 def _byte_after_words(arr: np.ndarray, base: int) -> int:

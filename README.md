@@ -18,7 +18,8 @@ só produz patches que o usuário aplica na própria cópia.
 - **Plugins de plataforma**: SNES (LoROM/HiROM/ExHiROM, com cálculo e correção do checksum interno),
   NES (iNES/NES 2.0), GBA, e um fallback genérico.
 - **CLI**: `identify`, `apply`, `patch`, `inspect`.
-- **CLI**: `identify`, `apply`, `patch`, `inspect`, `scan`, `dump`, `preview`, `verify`, `pointers`, `translate`, `build`.
+- **CLI**: `identify`, `apply`, `patch`, `inspect`, `scan`, `dump`, `preview`, `verify`, `pointers`,
+  `translate`, `build`, `dte`, `font show`, `font accents`.
 - **Tabela de caracteres** `.tbl` com suporte a DTE/MTE, e a garantia de que
   `decode` e `encode` são inversas exatas — byte sem mapeamento vira `[$XX]` e volta igual.
 - **Descoberta automática do alfabeto**, sem tabela prévia: cada um dos 231 alfabetos possíveis é
@@ -37,7 +38,14 @@ só produz patches que o usuário aplica na própria cópia.
   Ollama local, e `dummy` para exercitar o pipeline sem gastar token.
 - **Códigos de controle como tokens opacos** — `[END]`, `[LINE]`, `[$1F]` viram marcadores
   numerados antes de chegar ao modelo. O LLM nunca vê nem inventa um byte de controle.
-- 219 testes, incluindo fuzz de round-trip dos dois formatos de patch.
+- **Acentuação por edição de fonte**: `font accents` desenha `ã é ç õ` compondo os glifos que a ROM
+  já tem, grava nos tiles doadores e registra na tabela. Recusa quando não há linha livre no glifo,
+  em vez de entregar uma letra ilegível.
+- **Recuperação de DTE/MTE** apoiada num léxico do idioma de origem — propostas com evidência, não
+  certezas.
+- **Expansão de ROM** (`build --expand`), com o aviso de que só ponteiro largo alcança a área nova.
+- 245 testes, incluindo fuzz de round-trip dos dois formatos de patch e a inferência de DTE medida
+  contra uma tabela conhecida.
 
 ## Uso
 
@@ -125,8 +133,9 @@ menus, títulos de capítulo) sai completo.
 | **M1** | tabela de caracteres (`.tbl` com DTE/MTE), relative search, detecção de blocos de texto, `scan`/`dump` | ✅ |
 | **M2** | descoberta de tabelas de ponteiros, reinserção, `build`. *Critério inegociável:* `dump` + `build` sem alterar texto gera uma ROM **byte-idêntica** | ✅ |
 | **M3** | motores de tradução plugáveis (Claude, Ollama, `dummy`), glossário e memória de tradução | ✅ |
-| **M4** | geração do patch final e **realocação com reapontamento** ✅ · expansão de ROM ainda não | parcial |
-| **M5** | NES validado ponta a ponta com uma tradução real (ver `examples/`) · GBA ainda só em teste unitário | parcial |
+| **M4** | patch final, realocação com reapontamento e expansão de ROM | ✅ |
+| **M5** | SNES, NES e GBA validados ponta a ponta com traduções reais | ✅ |
+| **M6** | acentuação por edição de fonte, e recuperação assistida de DTE/MTE | ✅ |
 
 ## Princípios de projeto
 
@@ -175,6 +184,19 @@ $ cmp "Chrono Trigger (U) [!].smc" rebuild.smc            # idêntica, byte a by
 Se `encode(decode(bytes))` não devolvesse os mesmos bytes, qualquer tradução construída em cima
 corromperia a ROM em algum ponto que só apareceria horas depois de jogo.
 
+## Três consoles, três encodings, a mesma ferramenta
+
+| ROM | plataforma | espaço | a-z | A-Z | arranjo |
+|---|---|---|---|---|---|
+| Chrono Trigger | SNES HiROM | `0xEF` | `0xBA` | `0xA0` | `A-Z` **antes** de `a-z` |
+| Dragon Warrior | NES iNES-1 | `0x5F` | `0x0A` | `0x24` | `A-Z` **depois** de `a-z` |
+| Castlevania: Aria of Sorrow | GBA | `0x20` | `0x61` | `0x41` | ASCII (6 bytes entre `Z` e `a`) |
+
+Nenhum desses valores foi informado à ferramenta. Cada jogo derrubou uma suposição do detector:
+Dragon Warrior mostrou que `A-Z` nem sempre precede `a-z`, e Castlevania que as faixas nem sempre
+são adjacentes. O critério que sobreviveu aos três é o mesmo das minúsculas — **rebaixar a faixa
+candidata e contar palavras reais**: só o alinhamento certo transforma `Soma` em `soma`.
+
 ## Segunda plataforma: Dragon Warrior (NES) em português
 
 Um NES, um encoding diferente, e a mesma ferramenta — sem uma linha específica do jogo:
@@ -191,16 +213,71 @@ Depois de traduzir 40 falas e reconstruir:
 |---|---|
 | EN | `King Lorik will record thy deeds in his Imperial Scroll so thou may return to thy quest later` |
 | PT | `O Rei Lorik registrara teus feitos no Pergaminho Imperial para que retornes depois` |
-| EN | `Then came the Dragonlord who stole the precious globe and hid it in the darkness` |
-| PT | `Entao veio o Dragonlord que roubou a preciosa esfera e a escondeu nas trevas` |
+| EN | `Travel not to the south for there the monsters are fierce and terrible` |
+| PT | `Não vás ao sul pois lá os monstros são ferozes e terríveis` |
 
-Header iNES preservado, gráficos intactos, 3,22% dos bytes alterados, e o patch (IPS e BPS) reaplica
-na ROM original reproduzindo a traduzida byte a byte. O material está em
+Com acento de verdade — os glifos `á ã ç é í ó õ ú` não existiam na ROM e foram **desenhados** a
+partir dos que existiam (ver abaixo). Header iNES preservado, 3,36% dos bytes alterados, e o patch
+(IPS e BPS) reaplica na ROM original reproduzindo a traduzida byte a byte. O material está em
 [`examples/dragon-warrior-ptbr/`](examples/dragon-warrior-ptbr/).
 
 Esse jogo também consertou um erro de projeto: o detector de maiúsculas assumia que `A-Z` precede
 `a-z`, como no Chrono Trigger. Dragon Warrior faz o contrário. O critério passou a ser a assimetria
 de vizinhança, que vale nos dois.
+
+## Acentuação: desenhar as letras que a ROM não tem
+
+Traduzir para português esbarra numa parede que não é de software — a fonte não tem `ã`, `ç` nem `õ`.
+Nenhum ajuste de tabela resolve: o desenho precisa existir nos gráficos.
+
+`font accents` compõe os glifos que faltam a partir dos que existem, aproveitando que uma minúscula
+de 8×8 quase sempre deixa a linha de cima livre:
+
+```
+$ rom-translator font accents dw.yaml -o DW-fonte.nes --sacrifice J,X,Y,Z,F,V,y --letters "áãçéíóõú"
+doadores apos os sacrificios: 9
+ok á=0x56 ã=0x57 ç=0x2D é=0x3B í=0x3C ó=0x3D õ=0x29 ú=0x39  -> DW-fonte.nes
+```
+
+```
+  a original        ã gerado
+++++++++          +##+##++
++####+++          +####+++
+  ++##++            ++##++
++#....            +#....
+##++##++          ##++##++
+```
+
+O `--sacrifice` é a parte que não dá para automatizar sem mentir: a fonte do Dragon Warrior tem
+**dois** tiles livres e são precisos oito. Os outros seis vêm de reaproveitar letras que o idioma de
+destino não usa. `J`, `X`, `Y` e `Z` não aparecem **nenhuma vez** no script do jogo — custo zero.
+`F` e `V` aparecem 39 vezes somadas, e essas 39 ocorrências, em falas ainda não traduzidas, passam a
+mostrar uma letra acentuada no lugar. A ferramenta faz a troca e diz o que custou; a decisão é de
+quem traduz.
+
+Letras com haste alta não têm onde receber o acento, e aí `font accents` **recusa** em vez de
+entregar um glifo ilegível.
+
+## Recuperação de DTE/MTE
+
+Jogos de 8 e 16 bits comprimem diálogo trocando pares frequentes por um único byte. A tabela dessas
+trocas mora no código do jogo, e é por isso que ferramentas de romhacking pedem um `.tbl` pronto.
+
+`rom-translator dte` propõe as entradas apoiado num léxico do idioma de origem. **São propostas, não
+certezas** — e a honestidade aqui é o recurso principal, porque uma entrada errada corrompe a
+tradução inteira.
+
+Medido contra uma tabela conhecida (texto real do Dragon Warrior, compressão sintética de 16
+entradas): **7 recuperadas, 0 erradas**. Recall parcial, precisão total — o trade-off certo.
+
+Duas versões anteriores foram descartadas por medição, não por gosto:
+
+- **Dicionário tirado da própria ROM**: partia da ideia de que "sword" apareceria inteiro em algum
+  lugar e comprimido em outro. Não aparece — o compressor é determinístico. Recuperou **0 de 16**.
+- **Um voto por alinhamento**: uma palavra muito comprimida casa com centenas de palavras do léxico,
+  e contar cada uma deixava vencer o par mais comum do idioma. O byte de `th` recebeu 24 mil votos
+  para `ma`. Agora cada palavra vota uma vez, e só nos bytes em que **todos** os seus alinhamentos
+  concordam.
 
 ## Desenvolvimento
 

@@ -44,3 +44,34 @@ def test_hashes_are_stable():
     rom = Rom.from_bytes(b"chrono")
     assert rom.hashes()["crc32"] == f"{rom.crc32():08x}"
     assert len(rom.hashes()["sha1"]) == 40
+
+
+def test_expand_doubles_to_the_next_power_of_two():
+    rom = Rom.from_bytes(bytes(0x180000))
+    start, end = rom.expand()
+    assert (start, end) == (0x180000, 0x200000)
+    assert rom.size == 0x200000
+    assert bytes(rom.data[0x180000:]) == bytes(0x80000)
+
+
+def test_expand_accepts_an_explicit_size():
+    rom = Rom.from_bytes(bytes(100))
+    assert rom.expand(size=256, filler=0xFF) == (100, 256)
+    assert bytes(rom.data[100:]) == b"\xff" * 156
+
+
+def test_expand_refuses_to_shrink():
+    import pytest
+
+    rom = Rom.from_bytes(bytes(256))
+    with pytest.raises(ValueError, match="precisa passar de"):
+        rom.expand(size=128)
+
+
+def test_expanded_area_is_seen_as_free_space():
+    from rom_translator.core.space import find_free_space
+
+    rom = Rom.from_bytes(b"\xaa" * 0x1000)
+    rom.expand(size=0x2000)
+    regions = find_free_space(bytes(rom.data), min_run=0x100)
+    assert any(r.start == 0x1000 and r.end == 0x2000 for r in regions)

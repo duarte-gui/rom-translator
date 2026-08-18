@@ -67,6 +67,24 @@ class Rom:
             self.data.extend(b"\x00" * (end - len(self.data)))
         self.data[offset:end] = payload
 
+    def expand(self, size: int | None = None, filler: int = 0x00) -> tuple[int, int]:
+        """Aumenta a ROM ate `size` (padrao: proxima potencia de 2). Devolve (inicio, fim).
+
+        A faixa nova e espaco livre de verdade -- ninguem aponta para la. Mas so
+        serve para texto enderecavel por ponteiro *largo*: um ponteiro de 16 bits
+        nao alcanca um banco que nao existia antes. Quem chama precisa saber
+        disso; a expansao em si nao tem como impedir o mau uso.
+
+        Vale avisar tambem que nem todo emulador e nem todo cartucho aceitam uma
+        ROM expandida.
+        """
+        current = len(self.data)
+        target = size if size is not None else 1 << (current - 1).bit_length()
+        if target <= current:
+            raise ValueError(f"expansao precisa passar de {current} bytes, pediram {target}")
+        self.data.extend(bytes([filler]) * (target - current))
+        return current, target
+
     def copy(self) -> "Rom":
         return Rom(
             data=bytearray(self.data),

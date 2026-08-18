@@ -324,9 +324,11 @@ def verify(project_path: Path, script_path: Path, rom_override: Path | None) -> 
               help="move para espaco livre o que nao couber, reapontando os ponteiros")
 @click.option("--min-free-run", default=64, show_default=True,
               help="tamanho minimo de um trecho para valer como espaco livre")
+@click.option("--expand", is_flag=True,
+              help="dobra a ROM e usa a area nova como espaco livre (exige ponteiro largo)")
 def build(project_path: Path, script_path: Path, output: Path,
           rom_override: Path | None, allow_overflow: bool,
-          relocate: bool, min_free_run: int) -> None:
+          relocate: bool, min_free_run: int, expand: bool) -> None:
     """Reinsere as traducoes e grava a ROM traduzida."""
     project, rom, table, script = _load_all(project_path, script_path, rom_override)
     plugin, det = platforms.identify(rom.data)
@@ -338,6 +340,13 @@ def build(project_path: Path, script_path: Path, output: Path,
             _fail("nenhuma tabela de ponteiros no projeto; rode 'pointers' antes de --relocate")
         header = det.details.get("header_offset")
         exclude = [(header, header + 64)] if header is not None else []
+        expanded: tuple[int, int] | None = None
+        if expand:
+            expanded = rom.expand()
+            console.print(
+                f"[yellow]ROM expandida[/yellow] de {expanded[0]:,} para {expanded[1]:,} bytes "
+                "-- so alcancavel por ponteiro largo, e nem todo emulador aceita"
+            )
         regions = find_free_space(bytes(rom.data), min_run=min_free_run, exclude=exclude)
         allocator = SpaceAllocator(regions, bank_size=plugin.bank_size(det))
         relocator = Relocator(
@@ -562,6 +571,211 @@ def translate(script_path: Path, output: Path | None, engine_name: str, target_l
     console.print(f"[green]ok[/green] {summary} -> {output}")
     if notify:
         _notify_telegram(f"rom-translator: {summary}\narquivo: {output}")
+
+
+@main.command()
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
+@click.option("--lexicon", "lexicon_path", type=click.Path(exists=True, path_type=Path),
+              help="lista de palavras do idioma de ORIGEM (padrao: a do sistema)")
+@click.option("--apply", "apply_to_table", is_flag=True,
+              help="grava as propostas na tabela do projeto")
+@click.option("--min-confidence", default=0.6, show_default=True)
+@click.option("-n", "--count", default=30, show_default=True)
+def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None,
+        apply_to_table: bool, min_confidence: float, count: int) -> None:
+    """Propoe o que cada byte comprimido (DTE/MTE) representa.
+
+    Sao propostas, nao certezas: confira antes de aceitar. O algoritmo so opina
+    quando o lexico fixa a resposta, entao ele erra pouco -- mas cala em muitos
+    bytes, e nenhum deles e necessariamente DTE.
+    """
+    from .core.dte import infer_dte
+    from .core.lexicon import load_lexicon
+
+    project = Project.load(project_path)
+    rom = Rom.load(rom_override or project.rom_path)
+    table = project.load_table(project_path.parent)
+    plugin, det = platforms.identify(rom.data)
+
+    words = load_lexicon(lexicon_path)
+    if not words:
+        _fail("nenhuma lista de palavras encontrada; passe --lexicon")
+    console.print(f"lexico: {len(words):,} palavras")
+
+    space_bytes = table.bytes_for(" ")
+    if not space_bytes or len(space_bytes) != 1:
+        _fail("a tabela do projeto nao define o byte de espaco")
+    regions = [(b.start, b.end) for b in project.blocks]
+
+    with console.status("deduzindo..."):
+        guesses = infer_dte(
+            bytes(rom.data), regions, table, space_bytes[0], lexicon=words,
+            min_confidence=min_confidence,
+        )
+    if not guesses:
+        console.print("nenhuma proposta passou nos criterios")
+        return
+
+    view = RichTable(show_header=True, box=None, pad_edge=False)
+    view.add_column("byte", style="dim")
+    view.add_column("expansao")
+    view.add_column("ocorrencias", justify="right", style="dim")
+    view.add_column("apoio", justify="right", style="dim")
+    view.add_column("confianca", justify="right")
+    for guess in guesses[:count]:
+        view.add_row(f"0x{guess.byte:02X}", repr(guess.text), f"{guess.occurrences:,}",
+                     f"{guess.hits} vs {guess.runner_up}", f"{guess.confidence:.2f}")
+    console.print(view)
+    console.print(f"[dim]{len(guesses)} propostas no total[/dim]")
+
+    if apply_to_table:
+        path = project_path.parent / project.table_path
+        for guess in guesses:
+            table.entries[bytes([guess.byte])] = guess.text
+        table.reindex()
+        path.write_text(table.dumps(), encoding="utf-8")
+        console.print(f"[green]ok[/green] {len(guesses)} entradas somadas a {path}")
+
+
+@main.group()
+def font() -> None:
+    """Inspeciona e edita os tiles da fonte da ROM."""
+
+
+def _font_layout(rom: Rom, det, font_offset: int | None, fmt: str | None):
+    """Descobre onde ficam os tiles e em que formato, ou usa o que foi passado."""
+    if font_offset is None:
+        if det.platform != "nes":
+            _fail("passe --font-offset: so em NES da para deduzir (os graficos vem no CHR)")
+        font_offset = det.details["chr_offset"]
+    if fmt is None:
+        fmt = "nes2bpp" if det.platform == "nes" else "snes2bpp"
+    return font_offset, fmt
+
+
+@font.command("show")
+@click.argument("rom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--font-offset", type=lambda v: int(v, 0), help="onde comecam os tiles")
+@click.option("--format", "fmt", type=click.Choice(["nes2bpp", "snes2bpp", "snes4bpp"]))
+@click.option("--first", default=0, type=lambda v: int(v, 0), show_default=True)
+@click.option("-n", "--count", default=8, show_default=True)
+def font_show(rom_path: Path, font_offset: int | None, fmt: str | None,
+              first: int, count: int) -> None:
+    """Desenha tiles no terminal, para localizar a fonte e conferir os glifos."""
+    from .core.tiles import TILE_BYTES, decode_tile, render
+
+    rom = Rom.load(rom_path)
+    _plugin, det = platforms.identify(rom.data)
+    font_offset, fmt = _font_layout(rom, det, font_offset, fmt)
+    console.print(f"tiles em 0x{font_offset:06X}, formato {fmt}")
+    for index in range(first, first + count):
+        start = font_offset + index * TILE_BYTES[fmt]
+        if start + TILE_BYTES[fmt] > rom.size:
+            break
+        console.print(f"\n[cyan]tile 0x{index:02X}[/cyan]")
+        console.print(render(decode_tile(bytes(rom.data), start, fmt)))
+
+
+@font.command("accents")
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", required=True, type=click.Path(path_type=Path),
+              help="ROM de saida, com os glifos acentuados gravados")
+@click.option("--font-offset", type=lambda v: int(v, 0))
+@click.option("--format", "fmt", type=click.Choice(["nes2bpp", "snes2bpp", "snes4bpp"]))
+@click.option("--letters", default="áàâãéêíóôõúç", show_default=True,
+              help="quais letras acentuadas gerar")
+@click.option("--donors", help="bytes doadores separados por virgula (padrao: tiles em branco)")
+@click.option("--sacrifice", help="letras cujos tiles podem ser reaproveitados, ex: k,w,y,K,W,Y")
+def font_accents(project_path: Path, output: Path, font_offset: int | None,
+                 fmt: str | None, letters: str, donors: str | None,
+                 sacrifice: str | None) -> None:
+    """Desenha letras acentuadas a partir das existentes e registra na tabela.
+
+    Assume que o byte da tabela e o indice do tile -- convencao comum, e o caso
+    do Dragon Warrior. Confira com `font show` antes de gravar.
+
+    Fonte de jogo raramente tem slot sobrando: o Dragon Warrior tem dois. A saida
+    classica e `--sacrifice`, que reaproveita o tile de letras que o idioma de
+    destino nao usa (`k`, `w` e `y` em portugues). Elas saem da tabela, entao
+    qualquer texto que ainda dependa delas passa a nao codificar -- e o `build`
+    reclama em vez de escrever errado.
+    """
+    from .core.tiles import (
+        ACCENTS, TILE_BYTES, NoRoomForDiacritic, add_diacritic, decode_tile,
+        encode_tile, find_free_tiles,
+    )
+
+    project = Project.load(project_path)
+    rom = Rom.load(project.rom_path)
+    table = project.load_table(project_path.parent)
+    _plugin, det = platforms.identify(rom.data)
+    font_offset, fmt = _font_layout(rom, det, font_offset, fmt)
+    size = TILE_BYTES[fmt]
+
+    used = {raw[0] for raw in table.entries if len(raw) == 1}
+    if donors:
+        pool = [int(v, 0) for v in donors.split(",")]
+    else:
+        total = (rom.size - font_offset) // size
+        pool = find_free_tiles(bytes(rom.data), font_offset, total, fmt, used)
+        # so tiles enderecaveis por um byte de texto servem como doadores
+        pool = [index for index in pool if index < 256]
+        console.print(f"{len(pool)} tiles em branco e enderecaveis por um byte")
+        if not pool:
+            _fail(
+                "nenhum tile em branco abaixo de 0x100; use --donors com bytes que "
+                "o jogo nao usa (confira antes com 'font show')"
+            )
+
+    if sacrifice:
+        for letra in [c.strip() for c in sacrifice.split(",") if c.strip()]:
+            raw = table.bytes_for(letra)
+            if not raw or len(raw) != 1:
+                console.print(f"  [yellow]nao da para sacrificar {letra!r}[/yellow]: nao esta na tabela")
+                continue
+            del table.entries[raw]
+            table.reindex()
+            pool.append(raw[0])
+        console.print(f"doadores apos os sacrificios: {len(pool)}")
+
+    escritos, recusados = [], []
+    for letra in letters:
+        if letra not in ACCENTS:
+            recusados.append(f"{letra} (acento nao suportado)")
+            continue
+        base, mark = ACCENTS[letra]
+        origem = table.bytes_for(base)
+        if not origem or len(origem) != 1:
+            recusados.append(f"{letra} (a tabela nao tem {base!r})")
+            continue
+        if not pool:
+            recusados.append(f"{letra} (acabaram os tiles doadores)")
+            continue
+        tile = decode_tile(bytes(rom.data), font_offset + origem[0] * size, fmt)
+        try:
+            novo = add_diacritic(tile, mark)
+        except NoRoomForDiacritic as exc:
+            recusados.append(f"{letra} ({exc})")
+            continue
+        alvo = pool.pop(0)
+        rom.write(font_offset + alvo * size, encode_tile(novo, fmt))
+        table.entries[bytes([alvo])] = letra
+        escritos.append((letra, alvo))
+
+    table.reindex()
+    (project_path.parent / project.table_path).write_text(table.dumps(), encoding="utf-8")
+    rom.save(output)
+
+    console.print(
+        "[green]ok[/green] "
+        + " ".join(f"{letra}=0x{alvo:02X}" for letra, alvo in escritos)
+        + f"  -> {output}"
+    )
+    for motivo in recusados:
+        console.print(f"  [yellow]recusado[/yellow] {motivo}")
+    console.print(f"tabela atualizada: {project_path.parent / project.table_path}")
+    console.print(f"[dim]agora use --rom {output} nos proximos comandos[/dim]")
 
 
 if __name__ == "__main__":

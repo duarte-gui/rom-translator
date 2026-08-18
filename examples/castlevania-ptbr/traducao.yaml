@@ -1,0 +1,17 @@
+# Traducao PT-BR de descricoes de inimigo de Castlevania: Aria of Sorrow (GBA).
+# Chave = texto original extraido da ROM; valor = traducao.
+#
+# Sem acentos: a fonte do jogo e grafico comprimido, e `font accents` assume
+# que o byte da tabela e o indice do tile -- o que nao vale aqui.
+
+'A bird monster with the upper body  ': Monstro passaro com o torso de
+A demon that uses all four of its arms: Um demonio que usa os quatro bracos
+An armored soldier that throws bombs: Soldado blindado que lanca bombas
+Rabbit that uses a clock to stop time: Coelho que para o tempo com relogio
+'She is so thrilled to have become a ': Ela esta empolgada por ter virado um
+Specially chosen to defend important: Escolhido para defender algo valioso
+'The evil spirit of a man who drowned ': O espirito de um homem afogado
+This demon leaps out from mirrors and: Este demonio salta dos espelhos e
+'as if something was trying to keep ': como se algo tentasse manter
+my classmate and my childhood friend: colega de classe e amigo de infancia
+'the first full solar eclipse of the ': o primeiro eclipse solar total do

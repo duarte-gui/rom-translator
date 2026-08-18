@@ -12,13 +12,14 @@ from rich.table import Table as RichTable
 from . import platforms
 from .core.patch import apply_bps, apply_ips, create_bps, create_ips, detect_format
 from . import engines as engine_registry
-from .core.insert import insert, verify_roundtrip
+from .core.insert import Relocator, insert, verify_roundtrip
 from .core.pointers import find_pointers
 from .core.rom import Rom
 from .core.scanner import find_text_regions, guess_alphabet, looks_like_language
+from .core.space import SpaceAllocator, find_free_space
 from .core.script import Script
 from .core.table import Table
-from .project import Block, Project
+from .project import Block, PointerTableRef, Project
 
 console = Console()
 err = Console(stderr=True, style="bold red")
@@ -319,14 +320,36 @@ def verify(project_path: Path, script_path: Path, rom_override: Path | None) -> 
 @click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
 @click.option("--allow-overflow", is_flag=True,
               help="segue mesmo com traducoes que nao cabem (elas ficam no original)")
+@click.option("--relocate", is_flag=True,
+              help="move para espaco livre o que nao couber, reapontando os ponteiros")
+@click.option("--min-free-run", default=64, show_default=True,
+              help="tamanho minimo de um trecho para valer como espaco livre")
 def build(project_path: Path, script_path: Path, output: Path,
-          rom_override: Path | None, allow_overflow: bool) -> None:
+          rom_override: Path | None, allow_overflow: bool,
+          relocate: bool, min_free_run: int) -> None:
     """Reinsere as traducoes e grava a ROM traduzida."""
-    _, rom, table, script = _load_all(project_path, script_path, rom_override)
+    project, rom, table, script = _load_all(project_path, script_path, rom_override)
     plugin, det = platforms.identify(rom.data)
 
+    relocator = None
+    if relocate:
+        specs = project.pointer_specs()
+        if not specs:
+            _fail("nenhuma tabela de ponteiros no projeto; rode 'pointers' antes de --relocate")
+        header = det.details.get("header_offset")
+        exclude = [(header, header + 64)] if header is not None else []
+        regions = find_free_space(bytes(rom.data), min_run=min_free_run, exclude=exclude)
+        allocator = SpaceAllocator(regions, bank_size=plugin.bank_size(det))
+        relocator = Relocator(
+            rom=rom, table=table, plugin=plugin, det=det,
+            allocator=allocator, specs=specs,
+        )
+        console.print(
+            f"espaco livre: {allocator.total_free:,} bytes em {len(allocator.regions)} trechos"
+        )
+
     before = bytes(rom.data)
-    report = insert(rom, script, table)
+    report = insert(rom, script, table, relocator=relocator)
 
     if det.platform == "snes" and bytes(rom.data) != before:
         from .platforms.snes import fix_checksum
@@ -335,6 +358,8 @@ def build(project_path: Path, script_path: Path, output: Path,
 
     console.print(
         f"escritas {report.written:,} unidades"
+        + (f", {report.relocated:,} realocadas ({report.bytes_relocated:,} bytes)"
+           if report.relocated else "")
         + (f", {report.skipped_untranslated:,} ainda sem traducao"
            if report.skipped_untranslated else "")
     )
@@ -365,7 +390,7 @@ def build(project_path: Path, script_path: Path, output: Path,
 def pointers(project_path: Path, script_path: Path, output: Path | None,
              min_run: int, rom_override: Path | None) -> None:
     """Procura as tabelas de ponteiros que endereçam o texto extraido."""
-    _, rom, _table, script = _load_all(project_path, script_path, rom_override)
+    project, rom, _table, script = _load_all(project_path, script_path, rom_override)
     plugin, det = platforms.identify(rom.data)
     targets = {unit.offset: unit.id for unit in script.units}
 
@@ -383,11 +408,21 @@ def pointers(project_path: Path, script_path: Path, output: Path | None,
     for unit in script.units:
         unit.pointers = sorted(by_target.get(unit.offset, []))
 
+    project.pointer_tables = [
+        PointerTableRef(
+            offset=table.offset, count=table.count,
+            width=spec.width, endian=spec.endian, base=spec.base,
+        )
+        for spec, table in found
+    ]
+    project.save(project_path)
+
     covered = sum(1 for unit in script.units if unit.pointers)
     console.print(
         f"[green]ok[/green] {len(found)} tabelas, {covered:,} de {len(script.units):,} "
         f"unidades com ponteiro conhecido ({covered / max(len(script.units), 1):.1%})"
     )
+    console.print(f"tabelas gravadas em {project_path}")
     for _spec, table in sorted(found, key=lambda item: -item[1].count)[:8]:
         console.print(
             f"  [dim]0x{table.offset:06X}[/dim] {table.count:4d} ponteiros de "

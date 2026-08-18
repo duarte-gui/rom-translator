@@ -48,6 +48,9 @@ class NesPlugin(PlatformPlugin):
             return None
         return 0x8000 + ((offset - prg_off) % det.details["bank_size"])
 
+    def bank_size(self, det: Detection) -> int | None:
+        return det.details["bank_size"]
+
     def pointer_specs(self, det: Detection) -> list[PointerSpec]:
         return [PointerSpec("ptr16", width=2, endian="little")]
 

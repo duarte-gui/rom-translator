@@ -134,6 +134,10 @@ class SnesPlugin(PlatformPlugin):
         bank = 0xC0 + (offset // 0x10000)
         return (bank << 16) | (offset % 0x10000)
 
+    def bank_size(self, det: Detection) -> int | None:
+        # LoROM expoe meio banco de ROM por banco de CPU; HiROM expoe o banco inteiro
+        return 0x8000 if det.mapper == "lorom" else 0x10000
+
     def pointer_specs(self, det: Detection) -> list[PointerSpec]:
         return [
             PointerSpec("ptr16", width=2, endian="little"),

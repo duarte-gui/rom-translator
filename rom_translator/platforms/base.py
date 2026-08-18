@@ -69,6 +69,15 @@ class PlatformPlugin(ABC):
     def pointer_specs(self, det: Detection) -> list[PointerSpec]:
         return []
 
+    def bank_size(self, det: Detection) -> int | None:
+        """Bytes por banco, ou None se ponteiros enderecam a ROM inteira.
+
+        Importa para realocar texto: com ponteiro estreito, a string tem que
+        ficar no mesmo banco, senao o endereco reescrito aponta para o lugar
+        certo do banco errado.
+        """
+        return None
+
     def text_regions(self, data: bytes, det: Detection) -> list[tuple[int, int]]:
         """Faixas do arquivo onde faz sentido procurar texto. Padrao: tudo."""
         return [(0, len(data))]

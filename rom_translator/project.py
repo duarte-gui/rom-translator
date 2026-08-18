@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from .core.rom import Rom
+from .platforms.base import PointerSpec
 from .core.script import Script, Unit
 from .core.table import Table
 
@@ -124,6 +125,35 @@ class Block:
 
 
 @dataclass
+class PointerTableRef:
+    """Uma tabela de ponteiros descoberta, guardada para o `build` usar.
+
+    So o formato e a extensao interessam aqui -- quais unidades cada ponteiro
+    endereca vive no script, ao lado de cada unidade.
+    """
+
+    offset: int
+    count: int
+    width: int
+    endian: str = "little"
+    base: int = 0
+
+    @property
+    def end(self) -> int:
+        return self.offset + self.count * self.width
+
+    def spec(self) -> PointerSpec:
+        return PointerSpec(
+            name=f"ptr{self.width * 8}", width=self.width, endian=self.endian, base=self.base
+        )
+
+    def contains(self, offset: int) -> bool:
+        return (
+            self.offset <= offset < self.end and (offset - self.offset) % self.width == 0
+        )
+
+
+@dataclass
 class Project:
     rom_path: str = ""
     rom_sha1: str = ""
@@ -131,6 +161,7 @@ class Project:
     mapper: str = ""
     table_path: str = "table.tbl"
     blocks: list[Block] = field(default_factory=list)
+    pointer_tables: list[PointerTableRef] = field(default_factory=list)
     notes: str = ""
 
     # -- persistencia -----------------------------------------------------
@@ -157,6 +188,17 @@ class Project:
                 for b in self.blocks
             ],
         }
+        if self.pointer_tables:
+            payload["pointer_tables"] = [
+                {
+                    "offset": _hex(t.offset),
+                    "count": t.count,
+                    "width": t.width,
+                    **({"endian": t.endian} if t.endian != "little" else {}),
+                    **({"base": _hex(t.base)} if t.base else {}),
+                }
+                for t in self.pointer_tables
+            ]
         if self.notes:
             payload["notes"] = self.notes
         path.write_text(
@@ -180,7 +222,18 @@ class Project:
             )
             for item in payload.get("blocks", [])
         ]
+        tables = [
+            PointerTableRef(
+                offset=int(str(item["offset"]), 0),
+                count=int(item["count"]),
+                width=int(item["width"]),
+                endian=item.get("endian", "little"),
+                base=int(str(item.get("base", 0)), 0),
+            )
+            for item in payload.get("pointer_tables", [])
+        ]
         return cls(
+            pointer_tables=tables,
             rom_path=rom.get("path", ""),
             rom_sha1=rom.get("sha1", ""),
             platform=rom.get("platform", ""),
@@ -193,6 +246,15 @@ class Project:
     # -- uso --------------------------------------------------------------
     def load_table(self, base_dir: Path) -> Table:
         return Table.load(base_dir / self.table_path)
+
+    def pointer_specs(self) -> dict[int, PointerSpec]:
+        """Offset de cada ponteiro conhecido -> como ele e codificado."""
+        specs: dict[int, PointerSpec] = {}
+        for ref in self.pointer_tables:
+            spec = ref.spec()
+            for index in range(ref.count):
+                specs[ref.offset + index * ref.width] = spec
+        return specs
 
     def dump(self, rom: Rom, table: Table) -> Script:
         script = Script(rom_sha1=rom.sha1(), table=self.table_path)

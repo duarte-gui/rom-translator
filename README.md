@@ -22,17 +22,22 @@ só produz patches que o usuário aplica na própria cópia.
 - **Tabela de caracteres** `.tbl` com suporte a DTE/MTE, e a garantia de que
   `decode` e `encode` são inversas exatas — byte sem mapeamento vira `[$XX]` e volta igual.
 - **Descoberta automática do alfabeto**, sem tabela prévia: cada um dos 231 alfabetos possíveis é
-  testado por quantas *palavras reais* produz. O certo se separa por larga margem.
+  testado por quantas *palavras reais* produz. O certo se separa por larga margem. As maiúsculas
+  saem de uma assimetria de vizinhança — maiúscula é *seguida* por minúscula muito mais do que
+  precedida por uma — que funciona tanto onde `A-Z` vem antes de `a-z` quanto onde vem depois.
 - **Detecção de blocos de texto** pela assinatura estatística do espaçamento entre palavras.
 - **Descoberta de tabelas de ponteiros**, com o filtro estrutural que separa sinal de ruído:
   passo constante, alvos em ordem crescente e um mínimo de ponteiros seguidos.
-- **Reinserção conservadora**: cabe → escreve; sobra → completa com espaço; não cabe → **não escreve**
-  e reporta. Uma linha em inglês é melhor que uma ROM que trava depois de duas horas de jogo.
+- **Reinserção conservadora**: cabe → escreve; sobra → completa com espaço; não cabe → realoca para
+  espaço livre e reaponta, ou **não escreve** e reporta. Uma linha em inglês é melhor que uma ROM
+  que trava depois de duas horas de jogo.
+- **Realocação com consciência de banco**: com ponteiro de 16 bits a string tem que ficar no mesmo
+  banco — sair dele produz um endereço que aponta para o lugar certo do banco errado.
 - **Motores de tradução plugáveis**: Claude (saída estruturada, cache de prompt, glossário),
   Ollama local, e `dummy` para exercitar o pipeline sem gastar token.
 - **Códigos de controle como tokens opacos** — `[END]`, `[LINE]`, `[$1F]` viram marcadores
   numerados antes de chegar ao modelo. O LLM nunca vê nem inventa um byte de controle.
-- 204 testes, incluindo fuzz de round-trip dos dois formatos de patch.
+- 219 testes, incluindo fuzz de round-trip dos dois formatos de patch.
 
 ## Uso
 
@@ -99,10 +104,10 @@ Resultado atual:
 
 ### Limites honestos
 
-**Sem repointing (M4).** Hoje a tradução precisa caber no espaço da original. Se não couber, o
-`build` **recusa** aquela linha e diz de quantos bytes precisaria — em vez de escrever por cima da
-string seguinte. Mover a string e reajustar quem apontava para ela é o próximo passo; a descoberta
-de ponteiros que isso exige já está pronta.
+**Realocação exige terminador.** `build --relocate` move para espaço livre o que não couber e
+reescreve os ponteiros — mas só se a unidade terminar num token de fim. Sem terminador o jogo leria
+além da string nova até topar com um byte de fim por acaso, então a ferramenta **recusa** em vez de
+arriscar. Expansão de ROM ainda não existe.
 
 
 
@@ -120,8 +125,8 @@ menus, títulos de capítulo) sai completo.
 | **M1** | tabela de caracteres (`.tbl` com DTE/MTE), relative search, detecção de blocos de texto, `scan`/`dump` | ✅ |
 | **M2** | descoberta de tabelas de ponteiros, reinserção, `build`. *Critério inegociável:* `dump` + `build` sem alterar texto gera uma ROM **byte-idêntica** | ✅ |
 | **M3** | motores de tradução plugáveis (Claude, Ollama, `dummy`), glossário e memória de tradução | ✅ |
-| **M4** | geração do patch final ✅ · **repointing e expansão de ROM ainda não** | parcial |
-| **M5** | plugins NES e GBA (detecção, mapeamento e ponteiros testados; ainda não exercitados ponta a ponta numa ROM real) | parcial |
+| **M4** | geração do patch final e **realocação com reapontamento** ✅ · expansão de ROM ainda não | parcial |
+| **M5** | NES validado ponta a ponta com uma tradução real (ver `examples/`) · GBA ainda só em teste unitário | parcial |
 
 ## Princípios de projeto
 
@@ -169,6 +174,33 @@ $ cmp "Chrono Trigger (U) [!].smc" rebuild.smc            # idêntica, byte a by
 
 Se `encode(decode(bytes))` não devolvesse os mesmos bytes, qualquer tradução construída em cima
 corromperia a ROM em algum ponto que só apareceria horas depois de jogo.
+
+## Segunda plataforma: Dragon Warrior (NES) em português
+
+Um NES, um encoding diferente, e a mesma ferramenta — sem uma linha específica do jogo:
+
+```
+$ rom-translator scan "Dragon Warrior (U) (PRG1) [!].nes" -o dw.yaml
+nes/ines-1: 25 blocos, 25.088 bytes (30,6% da ROM)
+alfabeto deduzido: espaco=0x5F  a-z=0x0A  A-Z=0x24  (602 palavras reais contra 0 do 2o lugar)
+```
+
+Depois de traduzir 40 falas e reconstruir:
+
+| | |
+|---|---|
+| EN | `King Lorik will record thy deeds in his Imperial Scroll so thou may return to thy quest later` |
+| PT | `O Rei Lorik registrara teus feitos no Pergaminho Imperial para que retornes depois` |
+| EN | `Then came the Dragonlord who stole the precious globe and hid it in the darkness` |
+| PT | `Entao veio o Dragonlord que roubou a preciosa esfera e a escondeu nas trevas` |
+
+Header iNES preservado, gráficos intactos, 3,22% dos bytes alterados, e o patch (IPS e BPS) reaplica
+na ROM original reproduzindo a traduzida byte a byte. O material está em
+[`examples/dragon-warrior-ptbr/`](examples/dragon-warrior-ptbr/).
+
+Esse jogo também consertou um erro de projeto: o detector de maiúsculas assumia que `A-Z` precede
+`a-z`, como no Chrono Trigger. Dragon Warrior faz o contrário. O critério passou a ser a assimetria
+de vizinhança, que vale nos dois.
 
 ## Desenvolvimento
 

@@ -229,12 +229,8 @@ def guess_alphabet(
     runner_up = scored[1][0] if len(scored) > 1 else 0
     confidence = 1.0 - runner_up / hits
 
-    # maiusculas: quase sempre os 26 bytes imediatamente antes das minusculas
-    upper = lower - 26 if lower >= 26 else None
-    if upper is not None and counts[upper : upper + 26].min() < floor / 4:
-        upper = None
-
     space = _byte_after_words(arr, lower)
+    upper = _guess_upper(arr, lower, space, floor)
     return AlphabetGuess(
         space=space,
         lower_base=lower,
@@ -243,6 +239,45 @@ def guess_alphabet(
         word_hits=hits,
         runner_up_hits=runner_up,
     )
+
+
+#: uma maiuscula precisa ser seguida por minuscula com esta folga sobre o
+#: quanto ela e *precedida* por uma. Medido em Chrono Trigger (3.0) e Dragon
+#: Warrior (6.6); a faixa de digitos, principal falso positivo, fica em 0.38
+UPPER_RATIO = 2.0
+UPPER_MIN_FOLLOWED = 0.08
+
+
+def _guess_upper(
+    arr: np.ndarray, lower: int, space: int, floor: float
+) -> int | None:
+    """Acha a faixa das maiusculas, que tanto pode preceder quanto seguir as minusculas.
+
+    A ordem das duas faixas varia por jogo: Chrono Trigger poe A-Z antes de a-z,
+    Dragon Warrior poe depois. O que nao varia e a assimetria da vizinhanca --
+    uma maiuscula abre palavra, entao vem *seguida* de minuscula muito mais do
+    que precedida por uma. E o unico sinal testado que sobrevive aos dois jogos:
+    "vem depois de espaco" falha no Dragon Warrior (a frase abre logo apos um
+    codigo de controle) e "e seguida de minuscula" sozinho falha no Chrono
+    Trigger (onde o proximo byte costuma ser um par DTE).
+    """
+    is_lower = (arr >= lower) & (arr <= lower + 25)
+    best: tuple[int, float] | None = None
+    for base in (lower - 26, lower + 26):
+        if base < 0 or base + 25 > 255:
+            continue
+        positions = np.flatnonzero((arr >= base) & (arr <= base + 25))
+        positions = positions[(positions > 0) & (positions < len(arr) - 1)]
+        if positions.size < max(50, floor * 4):
+            continue
+        preceded = float(is_lower[positions - 1].mean())
+        followed = float(is_lower[positions + 1].mean())
+        if followed < UPPER_MIN_FOLLOWED or followed < preceded * UPPER_RATIO:
+            continue
+        ratio = followed / max(preceded, 1e-6)
+        if best is None or ratio > best[1]:
+            best = (base, ratio)
+    return best[0] if best else None
 
 
 def _byte_after_words(arr: np.ndarray, base: int) -> int:

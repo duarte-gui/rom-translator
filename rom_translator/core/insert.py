@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..platforms.base import Detection, PlatformPlugin, PointerSpec
 from .rom import Rom
 from .script import Script, Unit
+from .space import SpaceAllocator
 from .table import Table, TableError
 
 
@@ -25,6 +27,8 @@ from .table import Table, TableError
 class InsertReport:
     written: int = 0
     skipped_untranslated: int = 0
+    relocated: int = 0
+    bytes_relocated: int = 0
     overflow: list[tuple[Unit, int]] = field(default_factory=list)
     failed: list[tuple[Unit, str]] = field(default_factory=list)
 
@@ -33,11 +37,62 @@ class InsertReport:
         return not self.overflow and not self.failed
 
 
+@dataclass
+class Relocator:
+    """Move uma string para espaco livre e conserta quem apontava para ela.
+
+    Tres condicoes precisam valer, e qualquer uma que falte cancela a mudanca:
+
+    * a unidade tem que terminar num token de fim -- sem terminador, o jogo le
+      alem da string nova e continua lendo ate achar um byte de fim por acaso;
+    * todos os ponteiros que a enderecam precisam ser conhecidos e reescreviveis;
+    * com ponteiro estreito, o destino tem que cair no mesmo banco da origem.
+    """
+
+    rom: Rom
+    table: Table
+    plugin: PlatformPlugin
+    det: Detection
+    allocator: SpaceAllocator
+    #: offset do ponteiro -> como ele e codificado
+    specs: dict[int, PointerSpec] = field(default_factory=dict)
+    moved: dict[int, int] = field(default_factory=dict)
+
+    def can_relocate(self, unit: Unit, encoded: bytes) -> str:
+        """Devolve o motivo do impedimento, ou string vazia se pode mover."""
+        if not unit.pointers:
+            return "nenhum ponteiro conhecido aponta para esta unidade"
+        if not any(encoded.endswith(token) for token in self.table.end_tokens):
+            return "a unidade nao termina num token de fim"
+        missing = [p for p in unit.pointers if p not in self.specs]
+        if missing:
+            return f"ponteiro em 0x{missing[0]:06X} sem formato conhecido"
+        return ""
+
+    def relocate(self, unit: Unit, encoded: bytes) -> int | None:
+        """Escreve `encoded` em espaco livre e reaponta. None se nao deu."""
+        narrow = any(self.specs[p].width < 3 for p in unit.pointers)
+        bank = self.allocator.bank_of(unit.offset) if narrow else None
+        target = self.allocator.allocate(len(encoded), bank=bank)
+        if target is None:
+            return None
+        cpu = self.plugin.file_to_cpu(target, self.det)
+        if cpu is None:
+            return None
+        self.rom.write(target, encoded)
+        for pointer in unit.pointers:
+            spec = self.specs[pointer]
+            self.rom.write(pointer, spec.encode(cpu))
+        self.moved[unit.offset] = target
+        return target
+
+
 def insert(
     rom: Rom,
     script: Script,
     table: Table,
     padding: bytes | None = None,
+    relocator: "Relocator | None" = None,
 ) -> InsertReport:
     """Aplica as traducoes de `script` sobre `rom`, no lugar."""
     report = InsertReport()
@@ -51,7 +106,20 @@ def insert(
             report.failed.append((unit, str(exc)))
             continue
         if len(encoded) > unit.max_len:
-            report.overflow.append((unit, len(encoded)))
+            if relocator is None:
+                report.overflow.append((unit, len(encoded)))
+                continue
+            reason = relocator.can_relocate(unit, encoded)
+            if reason:
+                report.overflow.append((unit, len(encoded)))
+                unit.note = reason
+                continue
+            if relocator.relocate(unit, encoded) is None:
+                report.overflow.append((unit, len(encoded)))
+                unit.note = "sem espaco livre no banco de origem"
+                continue
+            report.relocated += 1
+            report.bytes_relocated += len(encoded)
             continue
         filler = padding if padding is not None else _guess_padding(rom, unit, table)
         block = encoded + filler * (unit.max_len - len(encoded))

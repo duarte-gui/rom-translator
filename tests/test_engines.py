@@ -2,8 +2,8 @@
 
 import pytest
 
-from romtrans.engines import EngineConfig, build, mask_controls, unmask_controls
-from romtrans.engines.base import TranslationRequest
+from rom_translator.engines import EngineConfig, build, mask_controls, unmask_controls
+from rom_translator.engines.base import TranslationRequest
 
 
 @pytest.mark.parametrize(
@@ -60,14 +60,14 @@ def test_unknown_engine_is_rejected():
 
 def test_claude_engine_is_lazy():
     """Registrar o motor Claude nao pode exigir o SDK nem uma chave de API."""
-    from romtrans.engines import ENGINES
+    from rom_translator.engines import ENGINES
 
     assert "claude" in ENGINES and "ollama" in ENGINES
 
 
 def test_claude_schema_is_strict():
     """Saida estruturada exige additionalProperties=false em todo objeto."""
-    from romtrans.engines.claude import SCHEMA
+    from rom_translator.engines.claude import SCHEMA
 
     assert SCHEMA["additionalProperties"] is False
     assert SCHEMA["properties"]["translations"]["items"]["additionalProperties"] is False

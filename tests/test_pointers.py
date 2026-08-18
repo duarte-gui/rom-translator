@@ -1,8 +1,8 @@
 """Descoberta de tabelas de ponteiros."""
 
-from romtrans.core.pointers import find_pointers, rewrite
-from romtrans.platforms import identify
-from romtrans.platforms.base import PointerSpec
+from rom_translator.core.pointers import find_pointers, rewrite
+from rom_translator.platforms import identify
+from rom_translator.platforms.base import PointerSpec
 from tests.test_platforms import _fake_snes
 
 

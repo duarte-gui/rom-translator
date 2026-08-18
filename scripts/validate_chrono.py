@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Valida o romtrans contra um gabarito humano: a traducao PT-BR de Chrono Trigger.
+"""Valida o rom-translator contra um gabarito humano: a traducao PT-BR de Chrono Trigger.
 
 O grupo CBT traduziu Chrono Trigger em 1998 (revisao 2010) e distribuiu como IPS.
 Aplicando esse patch temos um par (ROM em ingles, ROM em portugues) produzido por
@@ -23,12 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from romtrans.core.patch import apply_bps, apply_ips, create_bps, create_ips  # noqa: E402
-from romtrans.core.rom import Rom  # noqa: E402
-from romtrans.platforms import identify  # noqa: E402
-from romtrans.core.scanner import find_text_regions, guess_alphabet  # noqa: E402
-from romtrans.core.table import Table  # noqa: E402
-from romtrans.platforms.snes import checksum_valid  # noqa: E402
+from rom_translator.core.patch import apply_bps, apply_ips, create_bps, create_ips  # noqa: E402
+from rom_translator.core.rom import Rom  # noqa: E402
+from rom_translator.platforms import identify  # noqa: E402
+from rom_translator.core.scanner import find_text_regions, guess_alphabet  # noqa: E402
+from rom_translator.core.table import Table  # noqa: E402
+from rom_translator.platforms.snes import checksum_valid  # noqa: E402
 
 
 def diff_runs(a: bytes, b: bytes) -> list[tuple[int, int]]:

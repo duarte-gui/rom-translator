@@ -2,7 +2,7 @@
 
 import random
 
-from romtrans.core.scanner import (
+from rom_translator.core.scanner import (
     find_text_regions,
     guess_alphabet,
     looks_like_language,

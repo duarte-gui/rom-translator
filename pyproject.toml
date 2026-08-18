@@ -1,5 +1,5 @@
 [project]
-name = "romtrans"
+name = "rom-translator"
 version = "0.1.0"
 description = "Pipeline generico de traducao de ROMs: extrai, traduz com LLM, reinsere e gera patch"
 requires-python = ">=3.11"
@@ -7,9 +7,10 @@ dependencies = ["click>=8.1", "rich>=13.0", "numpy>=1.24", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+claude = ["anthropic>=0.40"]
 
 [project.scripts]
-romtrans = "romtrans.cli:main"
+rom-translator = "rom_translator.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -19,4 +20,4 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["romtrans*"]
+include = ["rom_translator*"]

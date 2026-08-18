@@ -2,8 +2,8 @@
 
 import pytest
 
-from romtrans import platforms
-from romtrans.platforms.snes import checksum_valid, compute_checksum, fix_checksum
+from rom_translator import platforms
+from rom_translator.platforms.snes import checksum_valid, compute_checksum, fix_checksum
 
 
 def _fake_snes(mapper: str = "hirom", size: int = 0x100000) -> bytes:

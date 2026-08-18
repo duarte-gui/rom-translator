@@ -2,10 +2,10 @@
 
 import pytest
 
-from romtrans.core.rom import Rom
-from romtrans.core.script import Script, Unit
-from romtrans.core.table import ascii_table
-from romtrans.project import Block, Project
+from rom_translator.core.rom import Rom
+from rom_translator.core.script import Script, Unit
+from rom_translator.core.table import ascii_table
+from rom_translator.project import Block, Project
 
 
 def test_fixed_block_splits_into_equal_entries():

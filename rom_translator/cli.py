@@ -1,4 +1,4 @@
-"""CLI do romtrans."""
+"""CLI do rom-translator."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _fail(message: str) -> None:
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.version_option("0.1.0", prog_name="romtrans")
+@click.version_option("0.1.0", prog_name="rom-translator")
 def main() -> None:
     """Pipeline de traducao de ROMs: identificar, extrair, traduzir, reinserir, gerar patch."""
 
@@ -215,7 +215,7 @@ def scan(rom_path: Path, output: Path, table_path: Path | None,
         mapper=det.mapper, table_path=table_name,
         blocks=[Block(id=f"b{i:03d}", start=r.start, end=r.end, kind="greedy", score=r.score)
                 for i, r in enumerate(regions)],
-        notes="gerado por 'romtrans scan' -- revise os blocos antes de traduzir",
+        notes="gerado por 'rom-translator scan' -- revise os blocos antes de traduzir",
     )
     project.save(output)
     console.print(f"[green]ok[/green] projeto gravado em {output}")
@@ -526,7 +526,7 @@ def translate(script_path: Path, output: Path | None, engine_name: str, target_l
     )
     console.print(f"[green]ok[/green] {summary} -> {output}")
     if notify:
-        _notify_telegram(f"romtrans: {summary}\narquivo: {output}")
+        _notify_telegram(f"rom-translator: {summary}\narquivo: {output}")
 
 
 if __name__ == "__main__":

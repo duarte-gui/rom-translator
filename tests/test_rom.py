@@ -1,6 +1,6 @@
 """Container de ROM: header de copiadora e hashes."""
 
-from romtrans.core.rom import Rom
+from rom_translator.core.rom import Rom
 
 
 def test_strips_512_byte_copier_header(tmp_path):

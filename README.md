@@ -1,10 +1,10 @@
-# romtrans
+# rom-translator
 
 Pipeline genérico de tradução de ROMs: **extrai o texto → traduz com IA → reinsere respeitando
 ponteiros e limites de espaço → gera um patch IPS/BPS**.
 
 A ideia vem das traduções de fã dos anos 90/2000, que eram feitas à mão: dump de texto, montagem da
-tabela de caracteres, reajuste de ponteiros, reinserção e distribuição em `.ips`. O romtrans automatiza
+tabela de caracteres, reajuste de ponteiros, reinserção e distribuição em `.ips`. O rom-translator automatiza
 esse ciclo, mantendo o mesmo modelo de distribuição — a ferramenta **nunca embute nem distribui ROMs**,
 só produz patches que o usuário aplica na própria cópia.
 
@@ -37,20 +37,20 @@ só produz patches que o usuário aplica na própria cópia.
 ## Uso
 
 ```bash
-romtrans identify jogo.smc                     # plataforma, mapeamento, título interno, hashes
-romtrans inspect  traducao.ips                 # o que o patch altera, sem aplicar
-romtrans apply    jogo.smc traducao.ips -o jogo-ptbr.smc
-romtrans patch    jogo.smc jogo-ptbr.smc -o traducao.bps
+rom-translator identify jogo.smc                     # plataforma, mapeamento, título interno, hashes
+rom-translator inspect  traducao.ips                 # o que o patch altera, sem aplicar
+rom-translator apply    jogo.smc traducao.ips -o jogo-ptbr.smc
+rom-translator patch    jogo.smc jogo-ptbr.smc -o traducao.bps
 
-romtrans scan     jogo.smc -o projeto.yaml     # acha os blocos de texto e deduz o alfabeto
-romtrans dump     projeto.yaml -o script.json  # extrai as unidades de texto
-romtrans preview  script.json --longest        # amostra do que foi extraído
+rom-translator scan     jogo.smc -o projeto.yaml     # acha os blocos de texto e deduz o alfabeto
+rom-translator dump     projeto.yaml -o script.json  # extrai as unidades de texto
+rom-translator preview  script.json --longest        # amostra do que foi extraído
 
-romtrans verify   projeto.yaml script.json     # o dump volta byte-idêntico?
-romtrans pointers projeto.yaml script.json -o script.json   # acha os ponteiros
-romtrans translate script.json --engine claude --to pt-BR --glossary g.yaml --notify
-romtrans build    projeto.yaml script.json -o traduzida.smc
-romtrans patch    jogo.smc traduzida.smc -o traducao.bps
+rom-translator verify   projeto.yaml script.json     # o dump volta byte-idêntico?
+rom-translator pointers projeto.yaml script.json -o script.json   # acha os ponteiros
+rom-translator translate script.json --engine claude --to pt-BR --glossary g.yaml --notify
+rom-translator build    projeto.yaml script.json -o traduzida.smc
+rom-translator patch    jogo.smc traduzida.smc -o traducao.bps
 ```
 
 ### O que o `scan` faz sozinho
@@ -58,11 +58,11 @@ romtrans patch    jogo.smc traduzida.smc -o traducao.bps
 Rodado no Chrono Trigger (U), sem nenhuma tabela ou conhecimento prévio do jogo:
 
 ```
-$ romtrans scan "Chrono Trigger (U) [!].smc" -o ct.yaml
+$ rom-translator scan "Chrono Trigger (U) [!].smc" -o ct.yaml
 snes/hirom: 1699 blocos, 990.208 bytes (23,6% da ROM)
 alfabeto deduzido: espaco=0xEF  a-z=0xBA  A-Z=0xA0  (483 palavras reais contra 181 do 2o lugar)
 
-$ romtrans dump ct.yaml -o ct.json && romtrans preview ct.json --longest
+$ rom-translator dump ct.yaml -o ct.json && rom-translator preview ct.json --longest
 0x3FD117    The Village of Magic
 0x3FD103    The End of Time
 0x3FD1A7    Forward to the Past
@@ -108,7 +108,7 @@ de ponteiros que isso exige já está pronta.
 
 O diálogo do Chrono Trigger usa **DTE/MTE** — bytes que representam pares e trechos de palavras — e
 a tabela DTE do jogo não é recuperável de forma genérica (depende do descompressor de cada jogo). O
-`romtrans` **suporta DTE/MTE na tabela**, mas essas entradas precisam vir de um `.tbl` fornecido pelo
+`rom-translator` **suporta DTE/MTE na tabela**, mas essas entradas precisam vir de um `.tbl` fornecido pelo
 usuário. O que o `scan` deduz sozinho é o alfabeto; o texto não comprimido (nomes de itens e inimigos,
 menus, títulos de capítulo) sai completo.
 
@@ -147,7 +147,7 @@ menus, títulos de capítulo) sai completo.
 | [Kruptar](https://romhack.github.io/doc/kruptarPlugins/) | dump/insert com recálculo de ponteiros e DTE/MTE | manual, Windows, sem IA |
 
 O espaço vazio: multi-plataforma por plugin **+** descoberta automática de tabela/ponteiros **+** LLM com
-provedor plugável **+** saída em patch. É o que o romtrans persegue.
+provedor plugável **+** saída em patch. É o que o rom-translator persegue.
 
 ## O pipeline completo, verificado
 
@@ -160,10 +160,10 @@ ROM → scan → dump → translate → build → patch → apply → byte-idên
 E o marco de segurança do M2, que autoriza tudo o que vem depois:
 
 ```
-$ romtrans verify ct.yaml ct-script.json
+$ rom-translator verify ct.yaml ct-script.json
 ok 6.116 unidades sobrevivem ao round-trip intactas
 
-$ romtrans build ct.yaml ct-script.json -o rebuild.smc   # sem nenhuma tradução
+$ rom-translator build ct.yaml ct-script.json -o rebuild.smc   # sem nenhuma tradução
 $ cmp "Chrono Trigger (U) [!].smc" rebuild.smc            # idêntica, byte a byte
 ```
 

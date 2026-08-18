@@ -8,9 +8,9 @@ import random
 
 import pytest
 
-from romtrans.core.patch import apply_bps, apply_ips, create_bps, create_ips, detect_format
-from romtrans.core.patch.bps import ChecksumMismatch, decode_varint, encode_varint
-from romtrans.core.patch.ips import EOF_OFFSET
+from rom_translator.core.patch import apply_bps, apply_ips, create_bps, create_ips, detect_format
+from rom_translator.core.patch.bps import ChecksumMismatch, decode_varint, encode_varint
+from rom_translator.core.patch.ips import EOF_OFFSET
 
 
 def _random_pair(rng: random.Random) -> tuple[bytes, bytes]:

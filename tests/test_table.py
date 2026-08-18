@@ -2,7 +2,7 @@
 
 import pytest
 
-from romtrans.core.table import Table, TableError, ascii_table
+from rom_translator.core.table import Table, TableError, ascii_table
 
 SAMPLE = """
 # tabela de exemplo

@@ -18,9 +18,9 @@ __all__ = [
 
 #: nome -> caminho de importacao preguicosa (nao carrega SDK de quem nao usa)
 ENGINES = {
-    "dummy": ("romtrans.engines.dummy", "DummyEngine"),
-    "claude": ("romtrans.engines.claude", "ClaudeEngine"),
-    "ollama": ("romtrans.engines.ollama", "OllamaEngine"),
+    "dummy": ("rom_translator.engines.dummy", "DummyEngine"),
+    "claude": ("rom_translator.engines.claude", "ClaudeEngine"),
+    "ollama": ("rom_translator.engines.ollama", "OllamaEngine"),
 }
 
 

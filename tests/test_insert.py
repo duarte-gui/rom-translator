@@ -1,9 +1,9 @@
 """Reinsercao: cabe, sobra, ou nao entra."""
 
-from romtrans.core.insert import insert, verify_roundtrip
-from romtrans.core.rom import Rom
-from romtrans.core.script import Script, Unit
-from romtrans.core.table import ascii_table
+from rom_translator.core.insert import insert, verify_roundtrip
+from rom_translator.core.rom import Rom
+from rom_translator.core.script import Script, Unit
+from rom_translator.core.table import ascii_table
 
 
 def _script(*units):

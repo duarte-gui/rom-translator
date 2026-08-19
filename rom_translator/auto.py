@@ -43,8 +43,10 @@ class AutoReport:
     nao_couberam: int = 0
     realocadas: int = 0
     terminador: int | None = None
+    largura_linha: int | None = None
     tabelas_de_ponteiro: int = 0
     motivo_sem_realocar: str = ""
+    nomes_proprios: list[str] = field(default_factory=list)
     acentos: list[tuple[str, int]] = field(default_factory=list)
     transliteradas: int = 0
     saidas: dict[str, Path] = field(default_factory=dict)
@@ -124,6 +126,28 @@ def inferir_terminador(
         return None
     byte, quantas = depois.most_common(1)[0]
     return byte, quantas / total
+
+
+def nomes_proprios(script: Script, lexico: set[str]) -> dict[str, str]:
+    """Nomes que o jogo inventou, pescados pela maiuscula fora do inicio da frase.
+
+    Maiuscula no meio de uma frase quase sempre e nome proprio, e nome proprio
+    ausente de qualquer dicionario e quase sempre invencao do jogo. No Dragon
+    Warrior isso devolve o elenco e a geografia inteiros -- Dragonlord, Erdrick,
+    Gwaelin, Lorik, Tantegel, Garinham -- sem um falso positivo.
+
+    Vao para o glossario como `nome -> nome`, que e a instrucao de nao traduzir.
+    """
+    contagem: Counter[str] = Counter()
+    for unidade in script.units:
+        tokens = unidade.text.split()
+        for indice, token in enumerate(tokens):
+            limpo = token.strip(".,!?'\"[]")
+            if indice == 0 or len(limpo) < 3 or not limpo.isalpha():
+                continue
+            if limpo[0].isupper() and limpo.lower() not in lexico:
+                contagem[limpo] += 1
+    return {nome: nome for nome, _ in contagem.most_common()}
 
 
 def acentos_necessarios(traducoes: list[str], tabela: Table) -> list[str]:
@@ -214,13 +238,38 @@ def run_auto(
         return report
     log(f"round-trip: {len(script.units):,} unidades voltam identicas")
 
-    # 5. traducao
+    # 5. largura de linha: o jogo pode guardar o texto em linhas coladas
+    from .core.lexicon import load_lexicon
+    from .core.wrap import detectar_largura
+
+    largura = None
+    lexico = load_lexicon("/usr/share/dict/words") or load_lexicon()
+    if lexico:
+        achado = detectar_largura([u.text for u in script.units], lexico)
+        if achado:
+            largura = achado.valor
+            report.largura_linha = largura
+            log(f"linhas de {largura} caracteres coladas "
+                f"({achado.juncoes}/{achado.total} juncoes na mesma coluna) -- "
+                "avisado ao tradutor, e a traducao volta re-quebrada nessa largura")
+
+    # 6. traducao
+    # nomes que o jogo inventou entram no glossario para nao serem traduzidos;
+    # o glossario que o usuario passou tem precedencia sobre o deduzido
+    achados = nomes_proprios(script, lexico) if lexico else {}
+    report.nomes_proprios = list(achados)
+    if achados:
+        log(f"nomes proprios: {' '.join(list(achados)[:8])}"
+            + (f" e mais {len(achados) - 8}" if len(achados) > 8 else ""))
+    combinado = {**achados, **(glossary or {})}
+
     config = engine_registry.EngineConfig(
-        target_lang=target_lang, game=game or nome, glossary=glossary or {}
+        target_lang=target_lang, game=game or nome, glossary=combinado,
+        line_width=largura,
     )
     engine = engine_registry.build(engine_name, config, **(engine_kwargs or {}))
     alvos = script.units[:limit] if limit else script.units
-    _traduzir(engine, alvos, log)
+    _traduzir(engine, alvos, largura, log)
     engine.close()
     traduzidas = [u for u in script.units if u.translated]
     report.traduzidas = len(traduzidas)
@@ -365,7 +414,20 @@ def _preparar_realocacao(
                      allocator=alocador, specs=especificacoes)
 
 
-def _traduzir(engine, unidades, log) -> None:
+def _traduzir(engine, unidades, largura, log) -> None:
+    """Traduz, e re-quebra a traducao na largura do jogo.
+
+    Na ida o texto vai como esta na ROM, com as palavras coladas -- um modelo de
+    linguagem le `goingto` sem dificuldade, e a alternativa que testei aqui era
+    pior: separar por dicionario acerta `goingto` e destroi `Dragonlord`, que
+    vira `Dragon lord`. O modelo sabe a diferenca porque le a frase; o
+    dicionario nao.
+
+    O que o modelo *nao* tem como saber e que a linha mede 16 caracteres. Isso
+    nao esta na lingua, esta na tela -- e por isso a largura continua sendo
+    medida, e serve para re-quebrar a traducao na volta.
+    """
+    from .core.wrap import redobrar
     from .engines.base import TranslationRequest, mask_controls, unmask_controls
 
     tamanho = engine.config.batch_size
@@ -382,8 +444,10 @@ def _traduzir(engine, unidades, log) -> None:
             log(f"  lote falhou: {exc}")
             continue
         for u, r in zip(lote, resultados):
-            if r.text is not None:
-                u.translation = unmask_controls(r.text, tokens[u.id])
+            if r.text is None:
+                continue
+            traduzido = unmask_controls(r.text, tokens[u.id])
+            u.translation = redobrar(traduzido, largura) if largura else traduzido
 
 
 def _acentuar(rom, tabela, script, traduzidas, plugin, det, caminho_tabela, report, log) -> None:

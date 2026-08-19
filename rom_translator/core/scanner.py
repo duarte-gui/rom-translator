@@ -347,7 +347,7 @@ VOWELS = frozenset("aeiouáéíóúâêôàãõäëïöü")
 
 def looks_like_language(
     text: str,
-    max_consonant_run: int = 4,
+    max_consonant_run: int = 6,
     min_vowel_ratio: float = 0.20,
     max_vowel_ratio: float = 0.68,
 ) -> bool:
@@ -356,6 +356,11 @@ def looks_like_language(
     Um bloco de graficos decodificado com a tabela certa vira algo como 'OyRf'
     -- letras validas, sequencia impossivel. Palavra de verdade tem vogais numa
     proporcao estreita e nao empilha consoantes indefinidamente.
+
+    O limite de consoantes era 4 e cortava frase boa: `offspring` tem `ffspr`, e
+    'The offspring of a lizard and a bird' -- descricao inteira de inimigo em
+    Castlevania -- era descartada antes de chegar ao tradutor. Com 6, entram 72
+    unidades a mais nessa ROM, 9 delas frases completas, sem lixo visivel junto.
     """
     letters = [c for c in text if c.isalpha()]
     if len(letters) < 3:

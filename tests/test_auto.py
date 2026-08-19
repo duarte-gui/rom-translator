@@ -258,3 +258,29 @@ def test_o_ponteiro_passa_a_apontar_para_o_texto_movido(tmp_path):
         destino = int.from_bytes(traduzida[posicao : posicao + 3], "little")
         lido = tabela.decode(traduzida, destino, 200, stop_at_end=True).text
         assert lido.replace("[END]", "") == longa, "o ponteiro tem que achar o texto novo"
+
+
+def test_pesca_os_nomes_proprios_do_jogo():
+    """Maiuscula fora do inicio da frase, e ausente do lexico: nome do jogo."""
+    from rom_translator.auto import nomes_proprios
+
+    script = Script(units=[
+        Unit(id="u1", offset=0, length=1, text="the Dragonlord waits in the castle", max_len=1),
+        Unit(id="u2", offset=1, length=1, text="Erdrick fought here long ago", max_len=1),
+        Unit(id="u3", offset=2, length=1, text="go to Tantegel and speak with Lorik", max_len=1),
+    ])
+    lexico = {"the", "waits", "castle", "fought", "here", "long", "ago", "and",
+              "speak", "with", "erdrick"}
+    achados = nomes_proprios(script, lexico)
+    assert "Dragonlord" in achados and "Tantegel" in achados and "Lorik" in achados
+    # 'Erdrick' abre a frase, entao nao conta -- e esta no lexico de qualquer forma
+    assert achados["Dragonlord"] == "Dragonlord", "o glossario manda copiar, nao traduzir"
+
+
+def test_nome_proprio_no_inicio_da_frase_nao_conta():
+    from rom_translator.auto import nomes_proprios
+
+    script = Script(units=[
+        Unit(id="u", offset=0, length=1, text="Castle guards stand here", max_len=1),
+    ])
+    assert "Castle" not in nomes_proprios(script, {"guards", "stand", "here"})

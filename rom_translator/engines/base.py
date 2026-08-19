@@ -64,6 +64,8 @@ class EngineConfig:
     game: str = ""
     glossary: dict[str, str] = field(default_factory=dict)
     batch_size: int = 40
+    #: largura da linha, quando o jogo cola as linhas sem espaco na quebra
+    line_width: int | None = None
 
 
 class TranslationEngine(ABC):

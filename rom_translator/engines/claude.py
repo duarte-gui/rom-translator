@@ -34,6 +34,7 @@ Regras invioláveis:
    a uma literal que estoure.
 3. Preserve espacos no inicio e no fim -- muitos jogos centralizam texto com eles.
 4. Nomes proprios de personagens e lugares seguem o glossario quando houver.
+   Entrada em que original e traducao sao iguais quer dizer: nao traduza, copie.
 5. Mantenha o registro do original: fala informal continua informal.
 
 Responda apenas com o JSON pedido."""
@@ -98,6 +99,15 @@ class ClaudeEngine(TranslationEngine):
         if self.config.game:
             parts.append(f"\nJogo: {self.config.game}")
         parts.append(f"\nIdioma de destino: {self.config.target_lang}")
+        if self.config.line_width:
+            parts.append(
+                f"\n\nO jogo quebra as falas em linhas de {self.config.line_width} "
+                "caracteres e nao guarda espaco na quebra, entao palavras chegam "
+                "coladas: 'goingto' e 'going to', 'youwith' e 'you with'. Leia "
+                "assim e traduza a frase inteira. Cuidado para nao separar nome "
+                "proprio que so parece colado -- 'Dragonlord' e um nome, nao "
+                "'Dragon lord'."
+            )
         if self.config.glossary:
             entries = "\n".join(f"  {k} -> {v}" for k, v in sorted(self.config.glossary.items()))
             parts.append(f"\nGlossario (obrigatorio):\n{entries}")

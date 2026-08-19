@@ -665,6 +665,9 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
 @click.option("--glossary", type=click.Path(exists=True, path_type=Path))
 @click.option("--translations", type=click.Path(exists=True, path_type=Path),
               help="para --engine file: YAML ou JSON com original -> traducao")
+@click.option("--base-url", help="para --engine openai: endereco do servidor")
+@click.option("--api-key", help="chave; sem ela usa HERMES_API_KEY, OPENAI_API_KEY ou ~/.config/secrets")
+@click.option("--model", "model_name", default="", help="modelo a pedir ao servidor")
 @click.option("--no-accents", is_flag=True, help="nao tentar desenhar letras acentuadas")
 @click.option("--no-relocate", is_flag=True,
               help="nao mover para espaco livre o que nao couber no lugar")
@@ -675,6 +678,7 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
 @click.option("--notify", is_flag=True, help="avisa no Telegram ao terminar")
 def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: str,
          game: str, glossary: Path | None, translations: Path | None,
+         base_url: str | None, api_key: str | None, model_name: str,
          no_accents: bool, no_relocate: bool, terminator: int | None,
          force: bool, limit: int | None, notify: bool) -> None:
     """Da ROM ao patch num comando so.
@@ -696,9 +700,15 @@ def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: st
         import yaml
 
         palavras = {str(k): str(v) for k, v in (yaml.safe_load(glossary.read_text()) or {}).items()}
-    extras = {"path": translations} if engine_name == "file" else {}
-    if engine_name == "file" and not translations:
-        _fail("--engine file exige --translations")
+    extras: dict = {}
+    if engine_name == "file":
+        if not translations:
+            _fail("--engine file exige --translations")
+        extras = {"path": translations}
+    elif engine_name == "openai":
+        if not base_url:
+            _fail("--engine openai exige --base-url")
+        extras = {"base_url": base_url, "api_key": api_key, "model": model_name}
 
     try:
         report = run_auto(

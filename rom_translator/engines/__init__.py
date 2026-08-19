@@ -22,6 +22,7 @@ ENGINES = {
     "claude": ("rom_translator.engines.claude", "ClaudeEngine"),
     "ollama": ("rom_translator.engines.ollama", "OllamaEngine"),
     "file": ("rom_translator.engines.filemap", "FileEngine"),
+    "openai": ("rom_translator.engines.openai_compat", "OpenAICompatEngine"),
 }
 
 

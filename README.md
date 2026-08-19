@@ -122,6 +122,17 @@ quando dá para saber onde a frase termina. Mover uma string cujo fim foi adivin
 jogo em silêncio, então o `auto` exige evidência forte (60% das frases fechando no mesmo byte) ou o
 `--terminator 0xNN`. A varredura de ponteiros só roda se algo de fato não couber.
 
+Além do Claude, há um motor para qualquer servidor no formato OpenAI — Hermes Agent, LM Studio,
+vLLM, llama.cpp em modo servidor, o `/v1` do Ollama:
+
+```bash
+rom-translator auto jogo.nes -e openai --base-url http://10.254.254.235:8642 --model seu-modelo
+```
+
+A chave sai de `HERMES_API_KEY`, `OPENAI_API_KEY` ou de `~/.config/secrets/hermes.env`. O lote
+encolhe para 12 linhas nesse motor (modelo menor se perde em lote grande) e a leitura da resposta
+tolera JSON embrulhado em cerca de código, que modelo local produz mesmo quando se pede JSON puro.
+
 Sem chave de API, o motor `file` lê traduções prontas de um YAML — o pipeline inteiro serve também a
 quem quer traduzir cada linha à mão.
 

@@ -110,13 +110,26 @@ def score_window(block: bytes) -> float:
 
 def find_text_regions(
     data: bytes,
-    window: int = 256,
-    stride: int = 128,
-    threshold: float = 0.45,
-    min_length: int = 256,
+    window: int = 64,
+    stride: int = 32,
+    threshold: float = 0.35,
+    min_length: int = 64,
     limits: list[tuple[int, int]] | None = None,
 ) -> list[TextRegion]:
-    """Varre a ROM e devolve as faixas que se parecem com texto."""
+    """Varre a ROM e devolve as faixas que se parecem com texto.
+
+    A janela era de 256 bytes, escolhida contra o Chrono Trigger, que guarda o
+    dialogo em blocos grandes e contiguos. Dois gabaritos depois ficou claro que
+    isso e a excecao, nao a regra -- Faxanadu e Illusion of Gaia espalham falas
+    curtas entre ponteiros e dados, e a janela larga dilui o sinal:
+
+        janela 256   CT 94,1%   Illusion 36,5%   Faxanadu 23,4%
+        janela  64   CT 93,5%   Illusion 66,9%   Faxanadu 56,0%
+
+    O Chrono Trigger perde meio ponto e os outros dois quase dobram. O custo e
+    sinalizar mais ROM (24% -> 41% no CT) e rodar cerca de duas vezes mais
+    devagar; o filtro linguistico do `dump` limpa o excesso depois.
+    """
     regions: list[TextRegion] = []
     for lo, hi in limits or [(0, len(data))]:
         hi = min(hi, len(data))

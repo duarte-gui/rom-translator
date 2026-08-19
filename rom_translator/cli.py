@@ -170,23 +170,21 @@ def inspect(patch_path: Path) -> None:
               show_default=True, help="arquivo de projeto a gerar")
 @click.option("-t", "--table", "table_path", type=click.Path(exists=True, path_type=Path),
               help="usa uma tabela .tbl pronta em vez de deduzir o alfabeto")
-@click.option("--threshold", default=0.45, show_default=True,
+@click.option("--threshold", default=0.35, show_default=True,
               help="quao parecido com texto um bloco precisa ser (0 a 1)")
-@click.option("--min-length", default=256, show_default=True,
+@click.option("--min-length", default=64, show_default=True,
               help="tamanho minimo de um bloco, em bytes")
-@click.option("--window", default=256, show_default=True,
+@click.option("--window", default=64, show_default=True,
               help="janela de analise; encolha quando o texto for espalhado em pedacos curtos")
-@click.option("--stride", default=128, show_default=True,
+@click.option("--stride", default=32, show_default=True,
               help="passo entre janelas (metade da janela e um bom padrao)")
 def scan(rom_path: Path, output: Path, table_path: Path | None,
          threshold: float, min_length: int, window: int, stride: int) -> None:
     """Procura os blocos de texto de uma ROM e deduz o alfabeto.
 
-    A janela padrao de 256 bytes assume que o texto mora em blocos grandes, que e
-    o caso comum. Jogos que espalham falas curtas pelo banco inteiro precisam de
-    janela menor: no Faxanadu (NES), medido contra a traducao PT-BR da Emu Brasil,
-    o recall vai de 23% com janela 256 para 61% com janela 32 -- ao custo de
-    sinalizar 28% da ROM em vez de 10%.
+    A janela padrao de 64 bytes foi escolhida medindo tres traducoes humanas.
+    Aumente para 256 se a ROM guardar o texto em blocos grandes e voce quiser
+    menos ruido; diminua para 32 se ainda escapar texto picado.
     """
     rom = Rom.load(rom_path)
     plugin, det = platforms.identify(rom.data)

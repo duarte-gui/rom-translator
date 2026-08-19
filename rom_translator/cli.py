@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table as RichTable
 
 from . import platforms
@@ -46,7 +47,7 @@ def identify(rom_path: Path) -> None:
     table = RichTable(show_header=False, box=None, pad_edge=False)
     table.add_column(style="cyan")
     table.add_column()
-    table.add_row("arquivo", str(rom_path))
+    table.add_row("arquivo", escape(str(rom_path)))
     table.add_row("tamanho", f"{rom.size:,} bytes ({rom.size / 1024:.0f} KiB)")
     if rom.copier_header:
         table.add_row("header copiadora", "512 bytes (removido para analise)")
@@ -651,6 +652,77 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
         table.reindex()
         path.write_text(table.dumps(), encoding="utf-8")
         console.print(f"[green]ok[/green] {len(guesses)} entradas somadas a {path}")
+
+
+@main.command()
+@click.argument("rom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--out", "out_dir", type=click.Path(path_type=Path),
+              help="onde gravar tudo (padrao: uma pasta com o nome da ROM)")
+@click.option("-e", "--engine", "engine_name", default="claude", show_default=True,
+              type=click.Choice(sorted(engine_registry.ENGINES)))
+@click.option("--to", "target_lang", default="pt-BR", show_default=True)
+@click.option("--game", default="", help="nome do jogo, dado como contexto ao motor")
+@click.option("--glossary", type=click.Path(exists=True, path_type=Path))
+@click.option("--translations", type=click.Path(exists=True, path_type=Path),
+              help="para --engine file: YAML ou JSON com original -> traducao")
+@click.option("--no-accents", is_flag=True, help="nao tentar desenhar letras acentuadas")
+@click.option("--force", is_flag=True, help="segue mesmo se a triagem reprovar")
+@click.option("--limit", type=int, help="traduz so as N primeiras unidades")
+@click.option("--notify", is_flag=True, help="avisa no Telegram ao terminar")
+def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: str,
+         game: str, glossary: Path | None, translations: Path | None,
+         no_accents: bool, force: bool, limit: int | None, notify: bool) -> None:
+    """Da ROM ao patch num comando so.
+
+    Recusa jogo que a triagem reprova -- texto comprimido nao tem como ser
+    traduzido sem a tabela de compressao, e insistir produz lixo com cara de
+    progresso. E confere o round-trip *antes* de traduzir: se reinserir o texto
+    original nao devolve a ROM byte a byte, nada do que vier depois presta.
+    """
+    from .auto import run_auto
+
+    out_dir = out_dir or rom_path.parent / f"{rom_path.stem} [{target_lang}]"
+    palavras = {}
+    if glossary:
+        import yaml
+
+        palavras = {str(k): str(v) for k, v in (yaml.safe_load(glossary.read_text()) or {}).items()}
+    extras = {"path": translations} if engine_name == "file" else {}
+    if engine_name == "file" and not translations:
+        _fail("--engine file exige --translations")
+
+    try:
+        report = run_auto(
+            rom_path=rom_path, out_dir=out_dir, engine_name=engine_name,
+            target_lang=target_lang, game=game, glossary=palavras,
+            engine_kwargs=extras, accents=not no_accents, force=force,
+            limit=limit, log=lambda m: console.print(f"[dim]·[/dim] {m}"),
+        )
+    except Exception as exc:
+        _fail(str(exc))
+
+    if not report.round_trip_ok and report.unidades:
+        _fail(f"round-trip quebrou em {report.round_trip_quebradas} unidades; "
+              "a tabela deduzida e ambigua e traduzir em cima corromperia a ROM")
+    if not report.saidas:
+        _fail(f"{report.veredito}: {report.explicacao}")
+
+    console.print(
+        f"\n[green]pronto[/green] {report.escritas:,} unidades escritas"
+        + (f", {report.nao_couberam:,} nao couberam" if report.nao_couberam else "")
+        + (f", {len(report.acentos)} acentos desenhados" if report.acentos else "")
+        + (f", {report.transliteradas:,} sem acento por falta de tile"
+           if report.transliteradas else "")
+    )
+    for rotulo, caminho in report.saidas.items():
+        # nomes de ROM vem cheios de colchetes -- [!], [pt-BR] -- e o rich os
+        # leria como marcacao, comendo pedaco do caminho na tela
+        console.print(f"  [cyan]{rotulo:8s}[/cyan] {escape(str(caminho))}")
+    if notify:
+        _notify_telegram(
+            f"rom-translator: {rom_path.name} traduzida para {target_lang}\n"
+            f"{report.escritas} unidades escritas -> {report.saidas.get('bps')}"
+        )
 
 
 @main.command()

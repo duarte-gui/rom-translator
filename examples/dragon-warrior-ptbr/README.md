@@ -39,15 +39,15 @@ realocação.
 ## A ordem importa
 
 ```bash
-rom-translator scan  "Dragon Warrior (U) (PRG1) [!].nes" -o dw.yaml --threshold 0.35 --min-length 128
-rom-translator dump  dw.yaml -o dw.json --min-chars 8          # ANTES de mexer na fonte
-rom-translator font accents dw.yaml -o DW-fonte.nes \
-    --sacrifice J,X,Y,Z,F,V,y --letters "áãçéíóõú"             # a tabela muda aqui
-python aplicar.py dw.json traducao.yaml dw-ptbr.json
-rom-translator build dw.yaml dw-ptbr.json -o "Dragon Warrior PT-BR.nes" --rom DW-fonte.nes
-rom-translator patch "Dragon Warrior (U) (PRG1) [!].nes" "Dragon Warrior PT-BR.nes" -o dw-ptbr.bps
+rom-translator auto "Dragon Warrior (U) (PRG1) [!].nes" \
+    -e file --translations traducao.yaml --to pt-BR
 ```
 
-O `dump` vem **antes** do `font accents`. Depois de sacrificar letras, a tabela decodifica aqueles
-bytes como acentos — e o texto original em inglês sai adulterado. Fazendo na ordem errada, `thy`
-lê-se `thá` e nenhuma tradução casa.
+Um comando. Ele tria, extrai, confere o round-trip, aplica as traduções, escolhe as letras doadoras
+sozinho, desenha os oito acentos e gera a ROM mais os patches IPS e BPS.
+
+Foi assim que este exemplo nasceu — mas à mão, em seis passos, e o `auto` existe justamente porque
+um deles é fácil de errar: o `dump` tem que vir **antes** do `font accents`. Depois de sacrificar
+letras, a tabela passa a decodificar aqueles bytes como acentos, e o texto original em inglês sai
+adulterado; na ordem errada, `thy` lê-se `thá` e nenhuma tradução casa. O `auto` não tem como errar
+essa ordem.

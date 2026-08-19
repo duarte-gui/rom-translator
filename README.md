@@ -77,9 +77,53 @@ conhece corta a sequência. Medido em sete ROMs de três consoles:
 Sete de sete. O Final Fantasy III cair em "parcial" é o resultado certo, não um empate: ele guarda
 nomes de item sem comprimir e o diálogo comprimido.
 
+## Um comando
+
+```bash
+rom-translator auto "Dragon Warrior (U).nes" --to pt-BR --engine claude
+```
+
+```
+· nes/ines-1
+· triagem: automatica viavel -- o texto sai em frases inteiras
+· extraidas 673 unidades
+· round-trip: 673 unidades voltam identicas
+· traduzidas 673 unidades
+· acentos: 8 necessarios, 9 tiles disponiveis (sacrificando J X Y Z F V y)
+·   desenhados: á=0x56 ã=0x57 ç=0x2D é=0x3B í=0x3C ó=0x3D õ=0x29 ú=0x39
+· escritas 673 unidades
+
+pronto  8 acentos desenhados
+  rom      Dragon Warrior (U) [pt-BR].nes
+  bps      Dragon Warrior (U) [pt-BR].bps
+```
+
+Duas travas moldam esse fluxo, e as duas existem porque falhar depois sai caro:
+
+**A triagem decide se começa.** Jogo que comprime diálogo não tem como ser traduzido sem a tabela de
+compressão, e insistir produz lixo com cara de progresso. O `auto` recusa e diz por quê:
+
+```
+$ rom-translator auto "Chrono Trigger (U).smc"
+erro: texto comprimido: o que sai sao cacos de 5 caracteres
+```
+
+**O round-trip vem antes da tradução.** Se reinserir o texto *original* não devolve a ROM byte a
+byte, a tabela deduzida é ambígua — e qualquer tradução construída em cima corrompe o jogo num ponto
+que só aparece horas depois. É a checagem mais barata do pipeline e a única que autoriza o resto.
+
+Os acentos são escolhidos com o mesmo critério que um tradutor humano usa, só que medido: as letras
+doadoras não são "as que o português não usa", são **as que este jogo não usa** — ordenadas pela
+raridade no script inteiro, para que sacrificar custe o mínimo. O que ainda assim não couber perde o
+acento (`ação` → `acao`) em vez de perder a linha.
+
+Sem chave de API, o motor `file` lê traduções prontas de um YAML — o pipeline inteiro serve também a
+quem quer traduzir cada linha à mão.
+
 ## Uso
 
 ```bash
+rom-translator auto jogo.nes --to pt-BR         # a cadeia inteira
 rom-translator triage jogo.smc                 # vale a pena tentar?
 rom-translator identify jogo.smc                     # plataforma, mapeamento, título interno, hashes
 rom-translator inspect  traducao.ips                 # o que o patch altera, sem aplicar

@@ -104,3 +104,22 @@ def test_finds_uppercase_in_every_known_layout(lower, upper, space, arranjo):
     guess = guess_alphabet(data)
     assert guess is not None, arranjo
     assert (guess.lower_base, guess.upper_base, guess.space) == (lower, upper, space), arranjo
+
+
+def test_small_window_finds_text_scattered_in_short_chunks():
+    """Licao do Faxanadu: nem todo jogo guarda o texto em blocos grandes.
+
+    Com falas curtas espalhadas entre dados, a janela de 256 bytes dilui o sinal
+    e o bloco passa despercebido. A janela menor acha.
+    """
+    rng = random.Random(3)
+    pedaco = _encode("the king said travel not to the south for there ")
+    data = bytearray()
+    for _ in range(40):
+        data += bytes(rng.randrange(256) for _ in range(48))
+        data += pedaco[: 48]
+    data = bytes(data)
+
+    grande = find_text_regions(data, window=256, stride=128, threshold=0.45, min_length=256)
+    pequena = find_text_regions(data, window=32, stride=16, threshold=0.35, min_length=32)
+    assert len(pequena) > len(grande), "janela menor deveria achar mais blocos curtos"

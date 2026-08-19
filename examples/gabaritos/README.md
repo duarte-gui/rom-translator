@@ -51,6 +51,42 @@ O gabarito passou a detectar expansão e a medir na área nova. E ganhou uma med
 bytes que aparecem no meio de palavras mas fora do alfabeto são candidatos a glifo acentuado — se
 baterem com Latin-1, ele diz qual letra é.
 
+## Faxanadu (NES) — Emu Brasil, POBRE e BR Games, 2017
+
+| | |
+|---|---|
+| patch | IPS, 18 KB, edita **no lugar** |
+| diff | 1.053 regiões, 16.549 bytes (6,3% da ROM) |
+| regiões que são texto | 724 (15.256 bytes) — o resto é gráfico e ponteiro |
+| recall do scanner | **23,4%** com a janela padrão · **61,5%** com janela de 32 bytes |
+| alfabeto | `0xFD / 0x61 / 0x41` — letras em ASCII, mas o espaço **não** |
+
+Lido de volta pela ferramenta:
+
+```
+Botão A' Sim   Botão B' Não
+vire à direita e siga em frente
+você consegue encontrá-las? Procu...
+```
+
+**O que quebrou:** o scanner. E não dá para culpar os gráficos — 724 das 1.053 regiões alteradas
+decodificam como texto. O Faxanadu espalha falas curtas pelo banco inteiro, entre ponteiros e dados,
+enquanto Chrono Trigger as guarda em blocos grandes e contíguos. A janela de 256 bytes dilui o sinal:
+
+| janela | recall sobre texto | ROM sinalizada |
+|---:|---:|---:|
+| 256 | 23,4% | 10% |
+| 128 | 41,9% | 17% |
+| 64 | 56,0% | 25% |
+| 32 | **61,5%** | 28% |
+
+Daí o `scan` ganhar `--window` e `--stride`. Mesmo no melhor caso são 61,5% contra os 94,1% do
+Chrono Trigger — a detecção por janela deslizante tem um teto quando o texto vem picado, e este
+número fica registrado como a limitação que é, não como meta cumprida.
+
+Os tradutores também remapearam pontuação para letras acentuadas — `ã` ocupa o slot `0x3B`, que no
+original era `;`. É o `--sacrifice` mais uma vez, agora numa tabela própria em vez de Latin-1.
+
 ## Castlevania: Aria of Sorrow (GBA) — Trans-Center, 2017
 
 Baixado, **não aplicável**: o patch é para a ROM europeia `(E - M3)` e a que temos é `(U)`.

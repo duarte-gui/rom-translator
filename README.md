@@ -180,6 +180,7 @@ lições — e o valor de cada um está no que **quebrou**:
 | **Golden Sun** (GBA, 2010) | 6.923 palavras na área nova | a **métrica**: expande a ROM em 565 KB em vez de editar no lugar |
 | **Faxanadu** (NES, 2017) | recall de 54,1% | o **scanner**: texto picado tem teto |
 | **Illusion of Gaia** (SNES, 2010) | recall de 63,4% | provou que os 94,1% eram exceção |
+| **Dragon Warrior** (NES, CBT 1999) | recall de 94,1% — e a **tradução**, não só o scanner | o passo de reaperto, que nunca rodava |
 
 A janela de análise era de 256 bytes, escolhida contra o único gabarito que existia. Com mais dois
 ficou claro que o Chrono Trigger é a exceção:
@@ -191,6 +192,24 @@ ficou claro que o Chrono Trigger é a exceção:
 
 O número antigo era um ajuste a um único jogo. Só apareceu como tal quando existiu um segundo ponto
 de medida.
+
+### Comparar a tradução, não só o scanner
+
+O mesmo patch responde uma pergunta mais dura: onde a nossa tradução é pior que a de uma pessoa.
+Alinhar por conteúdo não funciona — os dois lados estão em línguas diferentes. A âncora é a
+**estrutura de controle**, que o tradutor humano preserva porque mexer nela quebra o jogo. No Dragon
+Warrior a CBT manteve 103/300/188 dos `FB`/`FC`/`FD` contra 104/299/189 do original, o que casa 445
+das 450 unidades. É o que `scripts/compare_translations.py` faz.
+
+O que ele mostrou: das falas que ficaram em inglês, quase nenhuma tinha falhado na tradução — elas
+foram traduzidas certo e **descartadas por não caber**. `Welcome to Tantegel Castle` virou
+`Bemvindo ao Castelo Tantegel`, 28 caracteres para 26 de espaço. O humano escreveu
+`Aqui é o Castelo Tantegel.`, 26 exatos, com acento.
+
+E mostrou o que a ferramenta ainda não sabe fazer. Os bytes `0x50` e `0x52` aparecem **só** no
+começo (244 de 250) e **só** no fim (192 de 192) das unidades: são controles. O tradutor humano
+apagou os dois e reaproveitou os slots de tile deles para desenhar `í` e `ú` — 442 bytes de script e
+dois glifos, de uma tacada. Ele mexeu em 914 bytes de código fora do script; nós mexemos em 281.
 
 ---
 
@@ -208,8 +227,26 @@ responde "isso não é texto".
 produzindo `Oferecote`, `Dizse`, `trazerte`. O certo é dizer ao modelo quais caracteres existem — e
 que acentos são permitidos porque os glifos serão desenhados depois, mas pontuação não.
 
-**Ele ignora o limite de caracteres.** Uma segunda passada dizendo por quanto passou recupera só uma
-fração.
+**Ele ignora o limite de caracteres** — e a passada que corrigia isso nunca rodava. Ela media o
+estouro *antes* de os acentos serem desenhados, e nesse ponto qualquer linha com `ã` ainda não era
+codificável, então escapava inteira do filtro. Agora ela roda depois da transliteração, começando
+pelo que é de graça (espaço duplicado, ponto final que o modelo acrescentou sozinho) e só então
+pedindo ao modelo, com o limite exato e a tentativa anterior citada:
+
+```
+154 traducoes passaram do limite (64 por 1 ou 2 caracteres)
+  8 couberam so tirando espaco e pontuacao sobrando
+  pedindo 146 mais curtas (rodada 1)
+  pedindo 106 mais curtas (rodada 2)
+  65 passaram a caber
+```
+
+| | antes | depois |
+|---|---:|---:|
+| falas escritas | 379 | **403** |
+| não couberam | 106 | **81** |
+| estouro de 1–2 caracteres | 41 | **28** |
+| ainda em inglês (contra o gabarito humano) | 37 | **32** |
 
 **Ele engole lotes inteiros.** Uma rodada devolveu 30 de 30 linhas, a seguinte 12. Repetir as que
 faltaram em lotes menores recuperou 100 de 105 numa rodada completa.

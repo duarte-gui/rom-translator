@@ -47,9 +47,40 @@ só produz patches que o usuário aplica na própria cópia.
 - 245 testes, incluindo fuzz de round-trip dos dois formatos de patch e a inferência de DTE medida
   contra uma tabela conhecida.
 
+## Vale a pena tentar nesta ROM?
+
+Essa é a pergunta que decide um projeto de tradução, e o `triage` responde em segundos, só lendo:
+
+```
+$ rom-translator triage "Dragon Warrior (U) (PRG1) [!].nes"
+alfabeto             espaco 0x5F · a-z 0x0A · A-Z 0x24
+evidencia            595 palavras reais contra 0 do 2o candidato
+tamanho das falas    mediana 17 · p90 44 · 4.5 palavras por unidade
+
+AUTOMATICA VIAVEL -- o texto sai em frases inteiras
+```
+
+O que separa um caso do outro não é quanto texto a ROM tem, é o **comprimento** do que sai.
+Texto sem compressão sai em frases; comprimido sai picado, porque cada byte que a tabela não
+conhece corta a sequência. Medido em sete ROMs de três consoles:
+
+| ROM | mediana | p90 | veredito | e é mesmo |
+|---|---:|---:|---|---|
+| Dragon Warrior (NES) | 17 | 44 | automática viável | sem compressão |
+| Castlevania: AoS (GBA) | 11 | 23 | automática viável | ASCII puro |
+| Faxanadu (NES) | 12 | 15 | automática viável | sem compressão |
+| Final Fantasy III (SNES) | 8 | 22 | **parcial** | nomes legíveis, diálogo em DTE |
+| Chrono Trigger (SNES) | 5 | 8 | texto comprimido | DTE |
+| Illusion of Gaia (SNES) | 5 | 8 | texto comprimido | comprimido |
+| Golden Sun (GBA) | 5 | 7 | texto comprimido | comprimido |
+
+Sete de sete. O Final Fantasy III cair em "parcial" é o resultado certo, não um empate: ele guarda
+nomes de item sem comprimir e o diálogo comprimido.
+
 ## Uso
 
 ```bash
+rom-translator triage jogo.smc                 # vale a pena tentar?
 rom-translator identify jogo.smc                     # plataforma, mapeamento, título interno, hashes
 rom-translator inspect  traducao.ips                 # o que o patch altera, sem aplicar
 rom-translator apply    jogo.smc traducao.ips -o jogo-ptbr.smc

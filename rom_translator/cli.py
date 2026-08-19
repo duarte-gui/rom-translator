@@ -653,6 +653,59 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
         console.print(f"[green]ok[/green] {len(guesses)} entradas somadas a {path}")
 
 
+@main.command()
+@click.argument("rom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--window", default=64, show_default=True)
+@click.option("--stride", default=32, show_default=True)
+@click.option("--threshold", default=0.35, show_default=True)
+def triage(rom_path: Path, window: int, stride: int, threshold: float) -> None:
+    """Diz se vale tentar traduzir esta ROM automaticamente.
+
+    Roda so leitura -- nao escreve nada. Serve para descobrir em segundos se o
+    jogo comprime o dialogo, que e o que decide se o resto do pipeline funciona.
+    """
+    from .core.triage import triar
+
+    rom = Rom.load(rom_path)
+    plugin, det = platforms.identify(rom.data)
+    data = bytes(rom.data)
+    regions = find_text_regions(
+        data, window=window, stride=stride, threshold=threshold,
+        min_length=window, limits=plugin.text_regions(data, det),
+    )
+    t = triar(data, plugin, det, regions)
+
+    view = RichTable(show_header=False, box=None, pad_edge=False)
+    view.add_column(style="cyan")
+    view.add_column()
+    view.add_row("plataforma", f"{det.platform}/{det.mapper}"
+                 + (f"  {det.title}" if det.title else ""))
+    view.add_row("blocos de texto", f"{t.blocos:,}  ({t.fracao_sinalizada:.0%} da ROM)")
+    if t.espaco is not None:
+        maiusc = f"0x{t.maiusculas:02X}" if t.maiusculas is not None else "nao achadas"
+        view.add_row("alfabeto", f"espaco 0x{t.espaco:02X} · a-z 0x{t.minusculas:02X} · A-Z {maiusc}")
+        view.add_row("evidencia", f"{t.palavras_reais:,} palavras reais contra "
+                                  f"{t.segundo_lugar:,} do 2o candidato")
+        view.add_row("unidades na amostra", f"{t.unidades:,}  "
+                                            f"({t.fracao_linguagem:.0%} parecem lingua)")
+        view.add_row("tamanho das falas", f"mediana {t.mediana:.0f} · p90 {t.p90} · "
+                                          f"{t.palavras_por_unidade:.1f} palavras por unidade")
+    console.print(view)
+
+    cor = {"automatica viavel": "green", "parcial": "yellow",
+           "texto comprimido": "red", "sem texto legivel": "red"}[t.veredito]
+    console.print(f"\n[{cor}]{t.veredito.upper()}[/{cor}] -- {t.explicacao}")
+    if t.veredito == "automatica viavel":
+        console.print(f"\n[dim]proximo passo:[/dim] rom-translator scan "
+                      f"{rom_path.name!r} -o projeto.yaml")
+    elif t.veredito == "parcial":
+        console.print("\n[dim]proximo passo:[/dim] scan e dump normalmente, mas espere "
+                      "traduzir menus e nomes, nao o dialogo")
+    else:
+        console.print("\n[dim]proximo passo:[/dim] procure um .tbl publicado para este jogo "
+                      "e passe em --table; sem ele o dialogo nao e legivel")
+
+
 @main.group()
 def font() -> None:
     """Inspeciona e edita os tiles da fonte da ROM."""

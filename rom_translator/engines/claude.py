@@ -99,6 +99,17 @@ class ClaudeEngine(TranslationEngine):
         if self.config.game:
             parts.append(f"\nJogo: {self.config.game}")
         parts.append(f"\nIdioma de destino: {self.config.target_lang}")
+        if self.config.alphabet:
+            alfabeto = self.config.alphabet
+            texto = (
+                f"\n\nA fonte do jogo tem estes caracteres: {alfabeto}\n"
+                "Letras acentuadas do idioma de destino sao permitidas -- os "
+                "glifos que faltarem sao desenhados depois. Sinais de pontuacao "
+                "NAO sao: nada de hifen, apostrofo, virgula, ponto, dois-pontos "
+                "ou reticencias. Reescreva a frase para nao precisar deles -- "
+                "'Ofereco-te' vira 'Ofereco a ti', nao 'Oferecote'."
+            )
+            parts.append(texto)
         if self.config.line_width:
             parts.append(
                 f"\n\nO jogo quebra as falas em linhas de {self.config.line_width} "
@@ -126,7 +137,8 @@ class ClaudeEngine(TranslationEngine):
         if not requests:
             return []
         payload = [
-            {"id": r.id, "text": r.text, "max_chars": r.max_chars}
+            {"id": r.id, "text": r.text, "max_chars": r.max_chars,
+             **({"observacao": r.context} if r.context else {})}
             for r in requests
         ]
         message = self.client.messages.create(

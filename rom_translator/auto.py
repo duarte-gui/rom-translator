@@ -49,6 +49,8 @@ class AutoReport:
     nomes_proprios: list[str] = field(default_factory=list)
     acentos: list[tuple[str, int]] = field(default_factory=list)
     transliteradas: int = 0
+    encurtadas: int = 0
+    repetidas: int = 0
     saidas: dict[str, Path] = field(default_factory=dict)
 
 
@@ -148,6 +150,21 @@ def nomes_proprios(script: Script, lexico: set[str]) -> dict[str, str]:
             if limpo[0].isupper() and limpo.lower() not in lexico:
                 contagem[limpo] += 1
     return {nome: nome for nome, _ in contagem.most_common()}
+
+
+def tem_palavra_real(texto: str, lexico: set[str], minimo: int = 3) -> bool:
+    """Ao menos uma palavra do idioma de origem aparece inteira aqui.
+
+    Sem isso, bloco de grafico que o scanner marcou como texto chega ao modelo --
+    e modelo de linguagem nunca responde "isso nao e texto". Ele traduziu
+    `ihiyyA` para `Ola` e `wiyyyAwwy` para `Ei voce`, invencoes que seriam
+    gravadas por cima dos graficos do jogo.
+    """
+    for token in texto.split():
+        limpo = token.lower().strip(".,!?'\"[]")
+        if len(limpo) >= minimo and limpo.isalpha() and limpo in lexico:
+            return True
+    return False
 
 
 def acentos_necessarios(traducoes: list[str], tabela: Table) -> list[str]:
@@ -266,11 +283,61 @@ def run_auto(
     config = engine_registry.EngineConfig(
         target_lang=target_lang, game=game or nome, glossary=combinado,
         line_width=largura,
+        alphabet="".join(sorted(
+            valor for raw, valor in tabela.entries.items()
+            if len(raw) == 1 and len(valor) == 1 and valor.strip()
+        )),
     )
     engine = engine_registry.build(engine_name, config, **(engine_kwargs or {}))
-    alvos = script.units[:limit] if limit else script.units
+    candidatas = script.units
+    if lexico:
+        antes = len(candidatas)
+        candidatas = [u for u in candidatas if tem_palavra_real(u.text, lexico)]
+        if antes != len(candidatas):
+            log(f"{antes - len(candidatas):,} unidades sem nenhuma palavra real "
+                "ficaram de fora -- sao ruido do scanner")
+    # com limite, escolhe as mais longas: sao as com mais texto de verdade,
+    # nao as que por acaso estao no comeco da ROM
+    if limit:
+        candidatas = sorted(candidatas, key=lambda u: -len(u.text))[:limit]
+    alvos = candidatas
     _traduzir(engine, alvos, largura, log)
+
+    # o modelo as vezes engole um lote inteiro e devolve menos linhas do que
+    # recebeu. Medido no Hermes Agent: uma rodada devolveu 30 de 30 e a seguinte
+    # 12. Repetir as que faltam, em lotes menores, recupera boa parte
+    for tentativa in range(2):
+        faltando = [u for u in alvos if not u.translated]
+        if not faltando:
+            break
+        log(f"{len(faltando):,} linhas nao voltaram do modelo -- repetindo "
+            f"(tentativa {tentativa + 1})")
+        anterior = engine.config.batch_size
+        engine.config.batch_size = max(1, anterior // 3)
+        _traduzir(engine, faltando, largura, log)
+        engine.config.batch_size = anterior
+        report.repetidas += len(faltando) - sum(1 for u in faltando if not u.translated)
     engine.close()
+    # segunda passada so nas que nao couberam: o modelo respeita melhor o limite
+    # quando ve por quanto passou
+    estouradas = [
+        u for u in script.units
+        if u.translated and tabela.can_encode(u.translation)
+        and len(tabela.encode(u.translation)) > u.max_len
+    ]
+    if estouradas:
+        log(f"{len(estouradas):,} traducoes passaram do limite -- pedindo mais curtas")
+        antes = {u.id: u.translation for u in estouradas}
+        _encurtar(engine, estouradas, tabela, largura, log)
+        report.encurtadas = sum(
+            1 for u in estouradas
+            if u.translation != antes[u.id]
+            and tabela.can_encode(u.translation)
+            and len(tabela.encode(u.translation)) <= u.max_len
+        )
+        if report.encurtadas:
+            log(f"  {report.encurtadas:,} passaram a caber")
+
     traduzidas = [u for u in script.units if u.translated]
     report.traduzidas = len(traduzidas)
     log(f"traduzidas {len(traduzidas):,} unidades")
@@ -281,13 +348,21 @@ def run_auto(
     if accents:
         _acentuar(rom, tabela, script, traduzidas, plugin, det, caminho_tabela, report, log)
 
-    # 7. o que ainda nao codifica perde o acento em vez de perder a linha
+    # 7. o que ainda nao codifica perde o acento, e depois a pontuacao, em vez
+    #    de perder a linha inteira. O modelo escreve '.', '!' e ',' mesmo quando
+    #    a tabela deduzida nao tem nenhum deles
     for u in traduzidas:
-        if u.translation and not tabela.can_encode(u.translation):
-            simples = sem_acento(u.translation)
-            if tabela.can_encode(simples):
-                u.translation = simples
-                report.transliteradas += 1
+        if not u.translation or tabela.can_encode(u.translation):
+            continue
+        tentativa = sem_acento(u.translation)
+        if not tabela.can_encode(tentativa):
+            tentativa = "".join(c for c in tentativa if tabela.can_encode(c)).strip()
+            tentativa = " ".join(tentativa.split())
+        if tentativa and tabela.can_encode(tentativa):
+            u.translation = tentativa
+            report.transliteradas += 1
+        else:
+            u.translation = None
     if report.transliteradas:
         log(f"{report.transliteradas:,} traducoes perderam o acento por falta de tile")
 
@@ -448,6 +523,38 @@ def _traduzir(engine, unidades, largura, log) -> None:
                 continue
             traduzido = unmask_controls(r.text, tokens[u.id])
             u.translation = redobrar(traduzido, largura) if largura else traduzido
+
+
+def _encurtar(engine, unidades, tabela, largura, log) -> None:
+    """Repede as traducoes que nao couberam, dizendo por quanto passaram."""
+    from .core.wrap import redobrar
+    from .engines.base import TranslationRequest, mask_controls, unmask_controls
+
+    tamanho = max(1, engine.config.batch_size // 2)
+    for inicio in range(0, len(unidades), tamanho):
+        lote = unidades[inicio : inicio + tamanho]
+        pedidos, tokens = [], {}
+        for u in lote:
+            excesso = len(tabela.encode(u.translation)) - u.max_len
+            texto, marcas = mask_controls(u.text)
+            tokens[u.id] = marcas
+            pedidos.append(TranslationRequest(
+                id=u.id, text=texto, max_chars=u.max_len,
+                context=f"a traducao anterior passou {excesso} caracteres do limite "
+                        f"de {u.max_len}; reescreva mais curta sem cortar palavra",
+            ))
+        try:
+            resultados = engine.translate_batch(pedidos)
+        except Exception as exc:
+            log(f"  lote falhou: {exc}")
+            continue
+        for u, r in zip(lote, resultados):
+            if r.text is None:
+                continue
+            novo = unmask_controls(r.text, tokens[u.id])
+            novo = redobrar(novo, largura) if largura else novo
+            if tabela.can_encode(novo) and len(tabela.encode(novo)) <= u.max_len:
+                u.translation = novo
 
 
 def _acentuar(rom, tabela, script, traduzidas, plugin, det, caminho_tabela, report, log) -> None:

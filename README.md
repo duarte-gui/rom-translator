@@ -133,6 +133,40 @@ A chave sai de `HERMES_API_KEY`, `OPENAI_API_KEY` ou de `~/.config/secrets/herme
 encolhe para 12 linhas nesse motor (modelo menor se perde em lote grande) e a leitura da resposta
 tolera JSON embrulhado em cerca de código, que modelo local produz mesmo quando se pede JSON puro.
 
+### O que a primeira tradução por LLM ensinou
+
+Rodado contra um Hermes Agent 0.19.0 na rede local, em Dragon Warrior. Quatro defeitos apareceram no
+primeiro contato, e nenhum deles era do modelo:
+
+**O `--limit` pegava as primeiras unidades, que são as piores.** As de offset baixo são gráfico que
+o scanner marcou como texto. O modelo traduziu `ihiyyA` para `Olá` e `wiyyyAwwy` para `Ei você` —
+invenções que seriam gravadas por cima dos gráficos do jogo. Um modelo de linguagem nunca responde
+"isso não é texto". Agora o `auto` descarta unidade sem nenhuma palavra real, e o `--limit` pega as
+mais longas.
+
+**Eu apagava hífen em silêncio.** A tabela deduzida não tem `-`, e minha limpeza removia o caractere,
+produzindo `Oferecote`, `Dizse`, `trazerte`. O certo é dizer ao modelo quais caracteres existem — e
+que acentos são permitidos porque os glifos serão desenhados depois, mas pontuação não. Com isso as
+palavras coladas sumiram.
+
+**O modelo ignora o limite de caracteres.** Segunda passada nas que estouraram, dizendo por quanto
+passaram, recupera só uma fração. Fica registrado como limitação.
+
+**O modelo engole lotes inteiros.** Uma rodada devolveu 30 de 30 linhas, a seguinte 12. O `auto`
+repete as que faltaram em lotes menores, o que resolve na prática.
+
+Resultado típico com 30 linhas pedidas: **30 traduzidas, 22 a 24 escritas na ROM**, o resto estourando
+o limite. Amostra:
+
+```
+100/100  Dou a ti agora uma chance de partilhar este mundo e governar metade dele se quiser ficar ao meu lado
+ 95/97   Dizem que o Dragonlord tem garras que podem romper ferro e folego ardente que pode fundir pedra
+ 91/95   Tambem dizem que entrou na escuridao por uma entrada secreta no compartimento do Dragonlord
+```
+
+`Dragonlord` preservado pelo glossário automático, e `If you are goingto see the king` lido
+corretamente como `Se você vai falar com o rei` — o modelo atravessa a linha colada sem ajuda.
+
 Sem chave de API, o motor `file` lê traduções prontas de um YAML — o pipeline inteiro serve também a
 quem quer traduzir cada linha à mão.
 

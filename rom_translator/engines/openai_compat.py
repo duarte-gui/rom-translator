@@ -76,6 +76,17 @@ class OpenAICompatEngine(TranslationEngine):
         partes = [SISTEMA, f"\nIdioma de destino: {self.config.target_lang}"]
         if self.config.game:
             partes.append(f"Jogo: {self.config.game}")
+        if self.config.alphabet:
+            alfabeto = self.config.alphabet
+            texto = (
+                f"\n\nA fonte do jogo tem estes caracteres: {alfabeto}\n"
+                "Letras acentuadas do idioma de destino sao permitidas -- os "
+                "glifos que faltarem sao desenhados depois. Sinais de pontuacao "
+                "NAO sao: nada de hifen, apostrofo, virgula, ponto, dois-pontos "
+                "ou reticencias. Reescreva a frase para nao precisar deles -- "
+                "'Ofereco-te' vira 'Ofereco a ti', nao 'Oferecote'."
+            )
+            partes.append(texto)
         if self.config.line_width:
             partes.append(
                 f"As falas vem quebradas em linhas de {self.config.line_width} "
@@ -96,7 +107,9 @@ class OpenAICompatEngine(TranslationEngine):
         if not requests:
             return []
         carga = [
-            {"id": r.id, "text": r.text, "max_chars": r.max_chars} for r in requests
+            {"id": r.id, "text": r.text, "max_chars": r.max_chars,
+             **({"observacao": r.context} if r.context else {})}
+            for r in requests
         ]
         corpo = {
             "model": self.model,

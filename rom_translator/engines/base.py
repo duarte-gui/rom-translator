@@ -66,6 +66,8 @@ class EngineConfig:
     batch_size: int = 40
     #: largura da linha, quando o jogo cola as linhas sem espaco na quebra
     line_width: int | None = None
+    #: caracteres que a fonte do jogo tem. Vazio = sem restricao conhecida
+    alphabet: str = ""
 
 
 class TranslationEngine(ABC):

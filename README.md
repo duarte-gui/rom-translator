@@ -128,6 +128,35 @@ na tela. Então a largura continua sendo medida, pela concentração das junçõ
 (20 de 23 no Faxanadu, nenhuma concentração no Dragon Warrior), e serve para re-quebrar a tradução
 na volta.
 
+### Rodar o jogo de verdade
+
+Todas as outras checagens são de bytes — round-trip, checksum interno, patch reaplicando — e nenhuma
+percebe uma ROM que passa em tudo e trava na primeira tela. O `smoke` boota num emulador sem janela
+(`nes-py`, dependência opcional) e compara com a original:
+
+```
+$ rom-translator smoke "Dragon Warrior [pt-BR].nes" --compare "Dragon Warrior (U).nes"
+  original : boota e roda  (6 telas distintas)
+  traduzida: boota e roda  (6 telas distintas)
+  telas diferem em 0.9% dos pixels
+```
+
+Aqueles 0,9% são o texto traduzido aparecendo na tela. Divergência **zero** seria o alarme: a
+tradução não foi escrita, ou o roteiro não chegou onde ela aparece.
+
+E foi assim que a tradução do Dragon Warrior deixou de ser uma promessa de bytes:
+
+```
+┌──────────────────────────┐
+│ ▶BEGIN A NEW QUEST       │
+└──────────────────────────┘
+        ┌────────────────────────┐
+        │  AVENTURA  LOG 1       │
+        │  AVENTURA  LOG 2       │
+        │  AVENTURA  LOG 3       │
+        └────────────────────────┘
+```
+
 ### O portão que autoriza o resto
 
 Antes de traduzir uma linha sequer, o `auto` reinsere o texto **original** e exige que a ROM volte
@@ -204,8 +233,9 @@ aponta para ela. No Dragon Warrior o terminador foi descoberto (`0x52`), mas **n
 ponteiros** — procurei entrelaçada e dividida, até `min_run=4`. As mensagens são achadas contando
 terminadores, e aí não há ponteiro para reescrever.
 
-**A ferramenta nunca rodou o jogo.** Todas as verificações são de bytes: round-trip, checksum interno
-do SNES, patch reaplicando byte a byte. Nenhuma é comportamental.
+**Verificação comportamental existe, mas é rasa.** O `smoke` boota a ROM num emulador sem janela e
+confirma que ela roda — mas por ~800 quadros de menu, não uma partida inteira. Uma corrupção que só
+apareça na terceira masmorra passaria.
 
 ---
 
@@ -225,6 +255,7 @@ rom-translator build     projeto.yaml script.json -o traduzida.smc
 rom-translator patch     jogo.smc traduzida.smc -o traducao.bps
 rom-translator apply     jogo.smc traducao.ips -o jogo-ptbr.smc
 
+rom-translator smoke     traduzida.nes --compare original.nes   # boota e roda?
 rom-translator table gaps    projeto.yaml            # bytes que faltam na tabela, com contexto
 rom-translator font  show    jogo.nes                # desenha os tiles no terminal
 rom-translator font  accents projeto.yaml -o com-fonte.nes

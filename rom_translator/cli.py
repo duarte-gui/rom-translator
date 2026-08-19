@@ -801,6 +801,47 @@ def triage(rom_path: Path, window: int, stride: int, threshold: float) -> None:
                       "e passe em --table; sem ele o dialogo nao e legivel")
 
 
+@main.command()
+@click.argument("rom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--compare", "original", type=click.Path(exists=True, path_type=Path),
+              help="roda tambem a ROM original e compara a tela final")
+@click.option("--frames", default=900, show_default=True)
+@click.option("--shots", type=click.Path(path_type=Path), help="pasta para salvar capturas")
+def smoke(rom_path: Path, original: Path | None, frames: int, shots: Path | None) -> None:
+    """Boota a ROM num emulador sem janela e verifica que ela roda.
+
+    Todas as outras checagens sao de bytes -- round-trip, checksum, patch
+    reaplicando -- e nenhuma percebe uma ROM que passa em tudo e trava na
+    primeira tela. Precisa de `pip install nes-py` e so vale para NES.
+    """
+    from .core.smoke import comparar, fumaca
+
+    marcas = [int(frames * f) for f in (0.35, 0.6, 0.9)] if shots else []
+    if original:
+        a, b, div = comparar(original, rom_path, quadros=frames,
+                             capturas_em=marcas, pasta_capturas=shots)
+        console.print(f"  original : {a.veredito}  ({a.telas_distintas} telas distintas)")
+        console.print(f"  traduzida: {b.veredito}  ({b.telas_distintas} telas distintas)")
+        console.print(f"  telas diferem em {div:.1%} dos pixels")
+        if not b.ok:
+            _fail("a ROM traduzida nao roda direito")
+        if div == 0:
+            console.print("[yellow]aviso[/yellow] nenhuma diferenca visivel -- ou a "
+                          "traducao nao aparece nessas telas, ou nao foi escrita")
+        relatorio = b
+    else:
+        relatorio = fumaca(rom_path, quadros=frames, capturas_em=marcas,
+                           pasta_capturas=shots)
+        cor = "green" if relatorio.ok else "red"
+        console.print(f"  [{cor}]{relatorio.veredito}[/{cor}]  "
+                      f"({relatorio.quadros} quadros, {relatorio.telas_distintas} "
+                      f"telas distintas, {relatorio.fracao_preta:.0%} preta)")
+        if not relatorio.ok:
+            _fail(relatorio.veredito)
+    for caminho in relatorio.capturas:
+        console.print(f"  [cyan]captura[/cyan] {escape(str(caminho))}")
+
+
 @main.group()
 def table() -> None:
     """Inspeciona e completa a tabela de caracteres."""

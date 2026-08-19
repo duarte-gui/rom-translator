@@ -665,6 +665,8 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
 @click.option("--glossary", type=click.Path(exists=True, path_type=Path))
 @click.option("--translations", type=click.Path(exists=True, path_type=Path),
               help="para --engine file: YAML ou JSON com original -> traducao")
+@click.option("-t", "--table", "table_path", type=click.Path(exists=True, path_type=Path),
+              help="usa uma tabela .tbl pronta em vez de deduzir o alfabeto")
 @click.option("--base-url", help="para --engine openai: endereco do servidor")
 @click.option("--api-key", help="chave; sem ela usa HERMES_API_KEY, OPENAI_API_KEY ou ~/.config/secrets")
 @click.option("--model", "model_name", default="", help="modelo a pedir ao servidor")
@@ -677,7 +679,7 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
 @click.option("--limit", type=int, help="traduz so as N primeiras unidades")
 @click.option("--notify", is_flag=True, help="avisa no Telegram ao terminar")
 def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: str,
-         game: str, glossary: Path | None, translations: Path | None,
+         game: str, glossary: Path | None, translations: Path | None, table_path: Path | None,
          base_url: str | None, api_key: str | None, model_name: str,
          no_accents: bool, no_relocate: bool, terminator: int | None,
          force: bool, limit: int | None, notify: bool) -> None:
@@ -714,7 +716,7 @@ def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: st
         report = run_auto(
             rom_path=rom_path, out_dir=out_dir, engine_name=engine_name,
             target_lang=target_lang, game=game, glossary=palavras,
-            engine_kwargs=extras, accents=not no_accents,
+            table_path=table_path, engine_kwargs=extras, accents=not no_accents,
             relocate=not no_relocate, terminator=terminator, force=force,
             limit=limit, log=lambda m: console.print(f"[dim]·[/dim] {escape(m)}"),
         )

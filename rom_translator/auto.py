@@ -184,6 +184,7 @@ def run_auto(
     target_lang: str = "pt-BR",
     game: str = "",
     glossary: dict[str, str] | None = None,
+    table_path: Path | None = None,
     engine_kwargs: dict | None = None,
     accents: bool = True,
     relocate: bool = True,
@@ -218,10 +219,16 @@ def run_auto(
 
     # 2. alfabeto e projeto
     guess = guess_alphabet(data, regions)
-    if guess is None:
+    if table_path is not None:
+        # tabela fornecida ganha da deduzida: ela sabe pontuacao e codigos de
+        # controle, que a deducao nao tem como descobrir sozinha
+        tabela = Table.load(table_path)
+        log(f"tabela fornecida: {table_path.name} ({len(tabela)} entradas)")
+    elif guess is None:
         report.explicacao = "nao consegui deduzir o alfabeto"
         return report
-    tabela = Table.parse(guess.as_table_source())
+    else:
+        tabela = Table.parse(guess.as_table_source())
     caminho_tabela = out_dir / f"{nome}.tbl"
     caminho_tabela.write_text(tabela.dumps(), encoding="utf-8")
 

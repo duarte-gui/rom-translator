@@ -1,83 +1,7 @@
 # rom-translator
 
-Pipeline genérico de tradução de ROMs: **extrai o texto → traduz com IA → reinsere respeitando
-ponteiros e limites de espaço → gera um patch IPS/BPS**.
-
-A ideia vem das traduções de fã dos anos 90/2000, que eram feitas à mão: dump de texto, montagem da
-tabela de caracteres, reajuste de ponteiros, reinserção e distribuição em `.ips`. O rom-translator automatiza
-esse ciclo, mantendo o mesmo modelo de distribuição — a ferramenta **nunca embute nem distribui ROMs**,
-só produz patches que o usuário aplica na própria cópia.
-
-## O que já existe ✅
-
-- **Container de ROM** com remoção automática do header de 512 bytes das copiadoras antigas (SMC/FIG).
-- **IPS**: ler e escrever, incluindo registros RLE, truncamento e o caso patológico do offset `0x454F46`
-  (que colide com o marcador `EOF`).
-- **BPS**: ler e escrever, com verificação de CRC32 — aplicar um patch na ROM errada **falha** em vez de
-  gerar silenciosamente uma ROM corrompida.
-- **Plugins de plataforma**: SNES (LoROM/HiROM/ExHiROM, com cálculo e correção do checksum interno),
-  NES (iNES/NES 2.0), GBA, e um fallback genérico.
-- **CLI**: `identify`, `apply`, `patch`, `inspect`.
-- **CLI**: `identify`, `apply`, `patch`, `inspect`, `scan`, `dump`, `preview`, `verify`, `pointers`,
-  `translate`, `build`, `dte`, `font show`, `font accents`.
-- **Tabela de caracteres** `.tbl` com suporte a DTE/MTE, e a garantia de que
-  `decode` e `encode` são inversas exatas — byte sem mapeamento vira `[$XX]` e volta igual.
-- **Descoberta automática do alfabeto**, sem tabela prévia: cada um dos 231 alfabetos possíveis é
-  testado por quantas *palavras reais* produz. O certo se separa por larga margem. As maiúsculas
-  saem de uma assimetria de vizinhança — maiúscula é *seguida* por minúscula muito mais do que
-  precedida por uma — que funciona tanto onde `A-Z` vem antes de `a-z` quanto onde vem depois.
-- **Detecção de blocos de texto** pela assinatura estatística do espaçamento entre palavras.
-- **Descoberta de tabelas de ponteiros**, com o filtro estrutural que separa sinal de ruído:
-  passo constante, alvos em ordem crescente e um mínimo de ponteiros seguidos.
-- **Reinserção conservadora**: cabe → escreve; sobra → completa com espaço; não cabe → realoca para
-  espaço livre e reaponta, ou **não escreve** e reporta. Uma linha em inglês é melhor que uma ROM
-  que trava depois de duas horas de jogo.
-- **Realocação com consciência de banco**: com ponteiro de 16 bits a string tem que ficar no mesmo
-  banco — sair dele produz um endereço que aponta para o lugar certo do banco errado.
-- **Motores de tradução plugáveis**: Claude (saída estruturada, cache de prompt, glossário),
-  Ollama local, e `dummy` para exercitar o pipeline sem gastar token.
-- **Códigos de controle como tokens opacos** — `[END]`, `[LINE]`, `[$1F]` viram marcadores
-  numerados antes de chegar ao modelo. O LLM nunca vê nem inventa um byte de controle.
-- **Acentuação por edição de fonte**: `font accents` desenha `ã é ç õ` compondo os glifos que a ROM
-  já tem, grava nos tiles doadores e registra na tabela. Recusa quando não há linha livre no glifo,
-  em vez de entregar uma letra ilegível.
-- **Recuperação de DTE/MTE** apoiada num léxico do idioma de origem — propostas com evidência, não
-  certezas.
-- **Expansão de ROM** (`build --expand`), com o aviso de que só ponteiro largo alcança a área nova.
-- 245 testes, incluindo fuzz de round-trip dos dois formatos de patch e a inferência de DTE medida
-  contra uma tabela conhecida.
-
-## Vale a pena tentar nesta ROM?
-
-Essa é a pergunta que decide um projeto de tradução, e o `triage` responde em segundos, só lendo:
-
-```
-$ rom-translator triage "Dragon Warrior (U) (PRG1) [!].nes"
-alfabeto             espaco 0x5F · a-z 0x0A · A-Z 0x24
-evidencia            595 palavras reais contra 0 do 2o candidato
-tamanho das falas    mediana 17 · p90 44 · 4.5 palavras por unidade
-
-AUTOMATICA VIAVEL -- o texto sai em frases inteiras
-```
-
-O que separa um caso do outro não é quanto texto a ROM tem, é o **comprimento** do que sai.
-Texto sem compressão sai em frases; comprimido sai picado, porque cada byte que a tabela não
-conhece corta a sequência. Medido em sete ROMs de três consoles:
-
-| ROM | mediana | p90 | veredito | e é mesmo |
-|---|---:|---:|---|---|
-| Dragon Warrior (NES) | 17 | 44 | automática viável | sem compressão |
-| Castlevania: AoS (GBA) | 11 | 23 | automática viável | ASCII puro |
-| Faxanadu (NES) | 12 | 15 | automática viável | sem compressão |
-| Final Fantasy III (SNES) | 8 | 22 | **parcial** | nomes legíveis, diálogo em DTE |
-| Chrono Trigger (SNES) | 5 | 8 | texto comprimido | DTE |
-| Illusion of Gaia (SNES) | 5 | 8 | texto comprimido | comprimido |
-| Golden Sun (GBA) | 5 | 7 | texto comprimido | comprimido |
-
-Sete de sete. O Final Fantasy III cair em "parcial" é o resultado certo, não um empate: ele guarda
-nomes de item sem comprimir e o diálogo comprimido.
-
-## Um comando
+Traduz ROMs de videogame retro do começo ao fim: **acha o texto, descobre como o jogo o codifica,
+traduz com IA, desenha as letras acentuadas que faltam na fonte e devolve um patch IPS/BPS.**
 
 ```bash
 rom-translator auto "Dragon Warrior (U).nes" --to pt-BR --engine claude
@@ -86,283 +10,88 @@ rom-translator auto "Dragon Warrior (U).nes" --to pt-BR --engine claude
 ```
 · nes/ines-1
 · triagem: automatica viavel -- o texto sai em frases inteiras
-· extraidas 673 unidades
-· round-trip: 673 unidades voltam identicas
-· traduzidas 673 unidades
-· acentos: 8 necessarios, 9 tiles disponiveis (sacrificando J X Y Z F V y)
-·   desenhados: á=0x56 ã=0x57 ç=0x2D é=0x3B í=0x3C ó=0x3D õ=0x29 ú=0x39
-· escritas 673 unidades
+· extraidas 576 unidades
+· round-trip: 576 unidades voltam identicas
+· nomes proprios: Dragonlord Erdrick Gwaelin Lorik Tantegel Garinham e mais 11
+· 30 unidades sem nenhuma palavra real ficaram de fora -- sao ruido do scanner
+· 105 linhas nao voltaram do modelo -- repetindo (tentativa 1)
+· traduzidas 541 unidades
+· acentos: 9 necessarios, 3 tiles disponiveis (sacrificando Y)
+·   desenhados: é=0x56 ã=0x57 á=0x3C
+· escritas 389 unidades
 
-pronto  8 acentos desenhados
+pronto  389 unidades escritas, 3 acentos desenhados
   rom      Dragon Warrior (U) [pt-BR].nes
   bps      Dragon Warrior (U) [pt-BR].bps
 ```
 
-Duas travas moldam esse fluxo, e as duas existem porque falhar depois sai caro:
+Nenhuma tabela de caracteres foi fornecida. O `0x5F` do espaço, o `0x0A` do `a`, o `0x24` do `A`,
+os nomes próprios do jogo e os glifos acentuados — tudo saiu da própria ROM.
 
-**A triagem decide se começa.** Jogo que comprime diálogo não tem como ser traduzido sem a tabela de
-compressão, e insistir produz lixo com cara de progresso. O `auto` recusa e diz por quê:
+> **Não distribui ROMs.** Entrada é a sua cópia do jogo, saída é um patch. É o modelo que as
+> traduções de fã sempre usaram.
 
-```
-$ rom-translator auto "Chrono Trigger (U).smc"
-erro: texto comprimido: o que sai sao cacos de 5 caracteres
-```
+---
 
-**O round-trip vem antes da tradução.** Se reinserir o texto *original* não devolve a ROM byte a
-byte, a tabela deduzida é ambígua — e qualquer tradução construída em cima corrompe o jogo num ponto
-que só aparece horas depois. É a checagem mais barata do pipeline e a única que autoriza o resto.
+## Vale a pena tentar nesta ROM?
 
-Os acentos são escolhidos com o mesmo critério que um tradutor humano usa, só que medido: as letras
-doadoras não são "as que o português não usa", são **as que este jogo não usa** — ordenadas pela
-raridade no script inteiro, para que sacrificar custe o mínimo. O que ainda assim não couber perde o
-acento (`ação` → `acao`) em vez de perder a linha.
-
-Tradução que não couber no lugar é movida para espaço livre com os ponteiros reescritos — mas só
-quando dá para saber onde a frase termina. Mover uma string cujo fim foi adivinhado errado corrompe o
-jogo em silêncio, então o `auto` exige evidência forte (60% das frases fechando no mesmo byte) ou o
-`--terminator 0xNN`. A varredura de ponteiros só roda se algo de fato não couber.
-
-Além do Claude, há um motor para qualquer servidor no formato OpenAI — Hermes Agent, LM Studio,
-vLLM, llama.cpp em modo servidor, o `/v1` do Ollama:
-
-```bash
-rom-translator auto jogo.nes -e openai --base-url http://10.254.254.235:8642 --model seu-modelo
-```
-
-A chave sai de `HERMES_API_KEY`, `OPENAI_API_KEY` ou de `~/.config/secrets/hermes.env`. O lote
-encolhe para 12 linhas nesse motor (modelo menor se perde em lote grande) e a leitura da resposta
-tolera JSON embrulhado em cerca de código, que modelo local produz mesmo quando se pede JSON puro.
-
-### O que a primeira tradução por LLM ensinou
-
-Rodado contra um Hermes Agent 0.19.0 na rede local, em Dragon Warrior. Quatro defeitos apareceram no
-primeiro contato, e nenhum deles era do modelo:
-
-**O `--limit` pegava as primeiras unidades, que são as piores.** As de offset baixo são gráfico que
-o scanner marcou como texto. O modelo traduziu `ihiyyA` para `Olá` e `wiyyyAwwy` para `Ei você` —
-invenções que seriam gravadas por cima dos gráficos do jogo. Um modelo de linguagem nunca responde
-"isso não é texto". Agora o `auto` descarta unidade sem nenhuma palavra real, e o `--limit` pega as
-mais longas.
-
-**Eu apagava hífen em silêncio.** A tabela deduzida não tem `-`, e minha limpeza removia o caractere,
-produzindo `Oferecote`, `Dizse`, `trazerte`. O certo é dizer ao modelo quais caracteres existem — e
-que acentos são permitidos porque os glifos serão desenhados depois, mas pontuação não. Com isso as
-palavras coladas sumiram.
-
-**O modelo ignora o limite de caracteres.** Segunda passada nas que estouraram, dizendo por quanto
-passaram, recupera só uma fração. Fica registrado como limitação.
-
-**O modelo engole lotes inteiros.** Uma rodada devolveu 30 de 30 linhas, a seguinte 12. O `auto`
-repete as que faltaram em lotes menores, o que resolve na prática.
-
-Resultado típico com 30 linhas pedidas: **30 traduzidas, 22 a 24 escritas na ROM**, o resto estourando
-o limite. Amostra:
+Essa é a pergunta que decide um projeto de tradução, e o `triage` responde em segundos, só lendo:
 
 ```
-100/100  Dou a ti agora uma chance de partilhar este mundo e governar metade dele se quiser ficar ao meu lado
- 95/97   Dizem que o Dragonlord tem garras que podem romper ferro e folego ardente que pode fundir pedra
- 91/95   Tambem dizem que entrou na escuridao por uma entrada secreta no compartimento do Dragonlord
+$ rom-translator triage "Dragon Warrior (U).nes"
+alfabeto             espaco 0x5F · a-z 0x0A · A-Z 0x24
+evidencia            595 palavras reais contra 0 do 2o candidato
+tamanho das falas    mediana 17 · p90 44 · 4.5 palavras por unidade
+
+AUTOMATICA VIAVEL -- o texto sai em frases inteiras
 ```
 
-`Dragonlord` preservado pelo glossário automático, e `If you are goingto see the king` lido
-corretamente como `Se você vai falar com o rei` — o modelo atravessa a linha colada sem ajuda.
+O que separa um caso do outro não é quanto texto a ROM tem, é o **comprimento** do que sai. Texto sem
+compressão sai em frases; comprimido sai picado, porque cada byte que a tabela não conhece corta a
+sequência. Medido em sete ROMs de três consoles — **acerta as sete**:
 
-Sem chave de API, o motor `file` lê traduções prontas de um YAML — o pipeline inteiro serve também a
-quem quer traduzir cada linha à mão.
+| ROM | mediana | veredito | e é mesmo |
+|---|---:|---|---|
+| Dragon Warrior (NES) | 17 | automática viável | sem compressão |
+| Castlevania: Aria of Sorrow (GBA) | 11 | automática viável | ASCII puro |
+| Faxanadu (NES) | 12 | automática viável | sem compressão |
+| Final Fantasy III (SNES) | 8 | **parcial** | nomes legíveis, diálogo em DTE |
+| Chrono Trigger (SNES) | 5 | texto comprimido | DTE |
+| Illusion of Gaia (SNES) | 5 | texto comprimido | comprimido |
+| Golden Sun (GBA) | 5 | texto comprimido | comprimido |
 
-## Uso
+O Final Fantasy III cair em "parcial" é acerto, não empate: ele guarda nomes de item sem comprimir e
+o diálogo comprimido.
 
-```bash
-rom-translator auto jogo.nes --to pt-BR         # a cadeia inteira
-rom-translator triage jogo.smc                 # vale a pena tentar?
-rom-translator identify jogo.smc                     # plataforma, mapeamento, título interno, hashes
-rom-translator inspect  traducao.ips                 # o que o patch altera, sem aplicar
-rom-translator apply    jogo.smc traducao.ips -o jogo-ptbr.smc
-rom-translator patch    jogo.smc jogo-ptbr.smc -o traducao.bps
+---
 
-rom-translator scan     jogo.smc -o projeto.yaml     # acha os blocos de texto e deduz o alfabeto
-rom-translator dump     projeto.yaml -o script.json  # extrai as unidades de texto
-rom-translator preview  script.json --longest        # amostra do que foi extraído
+## Como funciona
 
-rom-translator verify   projeto.yaml script.json     # o dump volta byte-idêntico?
-rom-translator pointers projeto.yaml script.json -o script.json   # acha os ponteiros
-rom-translator translate script.json --engine claude --to pt-BR --glossary g.yaml --notify
-rom-translator build    projeto.yaml script.json -o traduzida.smc
-rom-translator patch    jogo.smc traduzida.smc -o traducao.bps
-```
+### Descobrir o alfabeto sem nenhuma tabela
 
-### O que o `scan` faz sozinho
+Não adianta procurar a faixa de bytes mais frequente — numa ROM de SNES o código e os gráficos
+abafam qualquer histograma. O que só o texto produz são **palavras**. Então cada um dos 231 alfabetos
+possíveis é testado por quantas palavras reais gera, e o certo se separa por larga margem.
 
-Rodado no Chrono Trigger (U), sem nenhuma tabela ou conhecimento prévio do jogo:
+Três jogos, três arranjos, e cada um derrubou uma suposição:
 
-```
-$ rom-translator scan "Chrono Trigger (U) [!].smc" -o ct.yaml
-snes/hirom: 1699 blocos, 990.208 bytes (23,6% da ROM)
-alfabeto deduzido: espaco=0xEF  a-z=0xBA  A-Z=0xA0  (483 palavras reais contra 181 do 2o lugar)
+| ROM | espaço | a-z | A-Z | arranjo |
+|---|---|---|---|---|
+| Chrono Trigger | `0xEF` | `0xBA` | `0xA0` | `A-Z` **antes** de `a-z` |
+| Dragon Warrior | `0x5F` | `0x0A` | `0x24` | `A-Z` **depois** de `a-z` |
+| Castlevania: AoS | `0x20` | `0x61` | `0x41` | ASCII (6 bytes entre `Z` e `a`) |
 
-$ rom-translator dump ct.yaml -o ct.json && rom-translator preview ct.json --longest
-0x3FD117    The Village of Magic
-0x3FD103    The End of Time
-0x3FD1A7    Forward to the Past
-0x3FD1D0    The Magic Kingdom
-0x3FD488    Save Battle Cursor
-```
+O critério que sobrevive aos três é o mesmo das minúsculas: **rebaixar a faixa candidata e contar
+palavras reais**. Só o alinhamento certo transforma `Soma` em `soma`. Tentei antes pela vizinhança
+(maiúscula é seguida de minúscula mais do que precedida) e em ASCII a janela errada pontuou mais alto.
 
-Os valores `0xEF/0xBA/0xA0` são o encoding real do Chrono Trigger, confirmado à mão — e foram
-deduzidos do zero.
+### Desenhar as letras que a ROM não tem
 
-## Validação contra gabarito humano
-
-O projeto usa a tradução PT-BR de **Chrono Trigger** feita pelo grupo CBT em 1998 (revisão 2010) como
-gabarito. Aplicar aquele IPS produz um par *(ROM em inglês, ROM em português)* feito por tradutores
-humanos — um dataset rotulado de graça, que mostra quais regiões da ROM contêm texto, como a tabela de
-caracteres foi estendida para acentos e quais ponteiros precisaram ser reajustados.
-
-```bash
-python scripts/validate_chrono.py "Chrono Trigger (U) [!].smc" traducao.ips
-```
-
-A prova mais forte aí é que o **checksum interno do SNES da ROM traduzida continua válido** depois da
-nossa aplicação — uma verificação independente de que os bytes foram para os lugares certos.
-
-Resultado atual:
-
-```
-1. aplicação do patch                                            OK
-2. round-trip de geração de patch (IPS e BPS)                    OK
-3. dataset rotulado: 14.590 regiões, 157.853 bytes (3,8% da ROM)
-4. scanner: recall de 94,1% sobre o que o tradutor humano alterou OK   (meta: 80%)
-5. alfabeto deduzido sem tabela prévia: 0xEF / 0xBA / 0xA0        OK
-```
-
-### Limites honestos
-
-**Realocação exige terminador.** `build --relocate` move para espaço livre o que não couber e
-reescreve os ponteiros — mas só se a unidade terminar num token de fim. Sem terminador o jogo leria
-além da string nova até topar com um byte de fim por acaso, então a ferramenta **recusa** em vez de
-arriscar. Expansão de ROM ainda não existe.
-
-
-
-O diálogo do Chrono Trigger usa **DTE/MTE** — bytes que representam pares e trechos de palavras — e
-a tabela DTE do jogo não é recuperável de forma genérica (depende do descompressor de cada jogo). O
-`rom-translator` **suporta DTE/MTE na tabela**, mas essas entradas precisam vir de um `.tbl` fornecido pelo
-usuário. O que o `scan` deduz sozinho é o alfabeto; o texto não comprimido (nomes de itens e inimigos,
-menus, títulos de capítulo) sai completo.
-
-## Roteiro
-
-| Marco | Conteúdo | Estado |
-|---|---|---|
-| **M0** | container de ROM, IPS/BPS ler+escrever, plugins de plataforma, CLI | ✅ |
-| **M1** | tabela de caracteres (`.tbl` com DTE/MTE), relative search, detecção de blocos de texto, `scan`/`dump` | ✅ |
-| **M2** | descoberta de tabelas de ponteiros, reinserção, `build`. *Critério inegociável:* `dump` + `build` sem alterar texto gera uma ROM **byte-idêntica** | ✅ |
-| **M3** | motores de tradução plugáveis (Claude, Ollama, `dummy`), glossário e memória de tradução | ✅ |
-| **M4** | patch final, realocação com reapontamento e expansão de ROM | ✅ |
-| **M5** | SNES, NES e GBA validados ponta a ponta com traduções reais | ✅ |
-| **M6** | acentuação por edição de fonte, e recuperação assistida de DTE/MTE | ✅ |
-
-## Princípios de projeto
-
-- **O core só conhece offsets de arquivo.** Todo mapeamento CPU↔arquivo, banco e formato de ponteiro
-  mora no `PlatformPlugin`. Adicionar um console = adicionar um plugin, sem tocar no core.
-- **Códigos de controle são tokens opacos**, nunca texto. `[END] [WAIT] [NAME]` viram placeholders antes
-  de irem para o LLM e são restaurados depois — o modelo não vê nem inventa bytes de controle.
-- **Orçamento de tamanho é restrição dura.** Cada unidade de texto carrega seu `max_len`; tradução que
-  estoura é re-pedida com o limite explícito, e só então parte para repointing.
-- **Escrita conservadora**: cabe no lugar → reaponta para espaço livre → expande a ROM (último recurso,
-  com aviso de incompatibilidade).
-- **Falhar alto.** Compressão não suportada é reportada como não suportada, nunca "traduzida" em lixo.
-
-## Prior art
-
-| Projeto | O que faz | Lacuna |
-|---|---|---|
-| [FamiLator](https://github.com/Matt-Retrogamer/FamiLator) | extrai → traduz (Ollama) → reinsere, com ponteiros | só NES/Famicom |
-| [Meowth-GBA-Translator](https://github.com/Olcmyk/Meowth-GBA-Translator) | GBA extract→traduz→build via LLM | só Pokémon (depende do decomp) |
-| [GameStringer](https://github.com/rouges78/GameStringer) | detecta engine, extrai, traduz, repatcheia | jogos de PC, não ROM de console |
-| [UniPatcher](https://github.com/btimofeev/UniPatcher) · [rombp](https://github.com/blakesmith/rombp) · [PyPatcherGBA](https://github.com/jarrowsmith123/PyPatcherGBA) | aplicam IPS/BPS/UPS/xdelta | não traduzem |
-| [retroarch-ai-translator](https://github.com/CrazyKitty357/retroarch-ai-translator) | OCR da tela em tempo real | não toca na ROM, não gera patch |
-| [Kruptar](https://romhack.github.io/doc/kruptarPlugins/) | dump/insert com recálculo de ponteiros e DTE/MTE | manual, Windows, sem IA |
-
-O espaço vazio: multi-plataforma por plugin **+** descoberta automática de tabela/ponteiros **+** LLM com
-provedor plugável **+** saída em patch. É o que o rom-translator persegue.
-
-## O pipeline completo, verificado
-
-Com `--engine dummy`, sem gastar um token, no Chrono Trigger real:
-
-```
-ROM → scan → dump → translate → build → patch → apply → byte-idêntico à ROM construída
-```
-
-E o marco de segurança do M2, que autoriza tudo o que vem depois:
-
-```
-$ rom-translator verify ct.yaml ct-script.json
-ok 6.116 unidades sobrevivem ao round-trip intactas
-
-$ rom-translator build ct.yaml ct-script.json -o rebuild.smc   # sem nenhuma tradução
-$ cmp "Chrono Trigger (U) [!].smc" rebuild.smc            # idêntica, byte a byte
-```
-
-Se `encode(decode(bytes))` não devolvesse os mesmos bytes, qualquer tradução construída em cima
-corromperia a ROM em algum ponto que só apareceria horas depois de jogo.
-
-## Três consoles, três encodings, a mesma ferramenta
-
-| ROM | plataforma | espaço | a-z | A-Z | arranjo |
-|---|---|---|---|---|---|
-| Chrono Trigger | SNES HiROM | `0xEF` | `0xBA` | `0xA0` | `A-Z` **antes** de `a-z` |
-| Dragon Warrior | NES iNES-1 | `0x5F` | `0x0A` | `0x24` | `A-Z` **depois** de `a-z` |
-| Castlevania: Aria of Sorrow | GBA | `0x20` | `0x61` | `0x41` | ASCII (6 bytes entre `Z` e `a`) |
-
-Nenhum desses valores foi informado à ferramenta. Cada jogo derrubou uma suposição do detector:
-Dragon Warrior mostrou que `A-Z` nem sempre precede `a-z`, e Castlevania que as faixas nem sempre
-são adjacentes. O critério que sobreviveu aos três é o mesmo das minúsculas — **rebaixar a faixa
-candidata e contar palavras reais**: só o alinhamento certo transforma `Soma` em `soma`.
-
-## Segunda plataforma: Dragon Warrior (NES) em português
-
-Um NES, um encoding diferente, e a mesma ferramenta — sem uma linha específica do jogo:
-
-```
-$ rom-translator scan "Dragon Warrior (U) (PRG1) [!].nes" -o dw.yaml
-nes/ines-1: 25 blocos, 25.088 bytes (30,6% da ROM)
-alfabeto deduzido: espaco=0x5F  a-z=0x0A  A-Z=0x24  (602 palavras reais contra 0 do 2o lugar)
-```
-
-Depois de traduzir 40 falas e reconstruir:
-
-| | |
-|---|---|
-| EN | `King Lorik will record thy deeds in his Imperial Scroll so thou may return to thy quest later` |
-| PT | `O Rei Lorik registrara teus feitos no Pergaminho Imperial para que retornes depois` |
-| EN | `Travel not to the south for there the monsters are fierce and terrible` |
-| PT | `Não vás ao sul pois lá os monstros são ferozes e terríveis` |
-
-Com acento de verdade — os glifos `á ã ç é í ó õ ú` não existiam na ROM e foram **desenhados** a
-partir dos que existiam (ver abaixo). Header iNES preservado, 3,36% dos bytes alterados, e o patch
-(IPS e BPS) reaplica na ROM original reproduzindo a traduzida byte a byte. O material está em
-[`examples/dragon-warrior-ptbr/`](examples/dragon-warrior-ptbr/).
-
-Esse jogo também consertou um erro de projeto: o detector de maiúsculas assumia que `A-Z` precede
-`a-z`, como no Chrono Trigger. Dragon Warrior faz o contrário. O critério passou a ser a assimetria
-de vizinhança, que vale nos dois.
-
-## Acentuação: desenhar as letras que a ROM não tem
-
-Traduzir para português esbarra numa parede que não é de software — a fonte não tem `ã`, `ç` nem `õ`.
-Nenhum ajuste de tabela resolve: o desenho precisa existir nos gráficos.
+Traduzir para português esbarra numa parede que não é de software: a fonte não tem `ã`, `ç` nem `õ`.
+Nenhum ajuste de tabela resolve — o desenho precisa existir nos gráficos.
 
 `font accents` compõe os glifos que faltam a partir dos que existem, aproveitando que uma minúscula
 de 8×8 quase sempre deixa a linha de cima livre:
-
-```
-$ rom-translator font accents dw.yaml -o DW-fonte.nes --sacrifice J,X,Y,Z,F,V,y --letters "áãçéíóõú"
-doadores apos os sacrificios: 9
-ok á=0x56 ã=0x57 ç=0x2D é=0x3B í=0x3C ó=0x3D õ=0x29 ú=0x39  -> DW-fonte.nes
-```
 
 ```
   a original        ã gerado
@@ -370,89 +99,185 @@ ok á=0x56 ã=0x57 ç=0x2D é=0x3B í=0x3C ó=0x3D õ=0x29 ú=0x39  -> DW-fonte.
 +####+++          +####+++
   ++##++            ++##++
 +#....            +#....
-##++##++          ##++##++
 ```
 
-O `--sacrifice` é a parte que não dá para automatizar sem mentir: a fonte do Dragon Warrior tem
-**dois** tiles livres e são precisos oito. Os outros seis vêm de reaproveitar letras que o idioma de
-destino não usa. `J`, `X`, `Y` e `Z` não aparecem **nenhuma vez** no script do jogo — custo zero.
-`F` e `V` aparecem 39 vezes somadas, e essas 39 ocorrências, em falas ainda não traduzidas, passam a
-mostrar uma letra acentuada no lugar. A ferramenta faz a troca e diz o que custou; a decisão é de
-quem traduz.
+A parte que não dá para automatizar sem mentir é de onde vem o tile. A fonte do Dragon Warrior tem
+**dois** livres e são precisos oito. Os outros vêm de reaproveitar letras — e o critério certo não é
+"as que o português não usa", é **as que este jogo não usa**, ordenadas por raridade no script
+inteiro. `J`, `X`, `Y` e `Z` não aparecem uma vez sequer ali: custo zero. `F` e `V` aparecem 39
+vezes somadas, e essas 39 ocorrências, em falas ainda não traduzidas, passam a mostrar um acento no
+lugar. A ferramenta faz a troca e diz o que custou.
 
-Letras com haste alta não têm onde receber o acento, e aí `font accents` **recusa** em vez de
-entregar um glifo ilegível.
+Três traduções humanas confirmam o mecanismo de forma independente. O tradutor de Castlevania
+escreveu em 2006:
 
-## De onde vem o `.tbl`
+> *"como não haviam todos, eu troquei alguns caracteres acentuados inúteis, como `ù`, `ì`, `ö`, pelos
+> que faltavam"*
 
-O `.tbl` é o dicionário entre bytes da ROM e texto, e é a peça que decide tudo. Três caminhos:
+### Linhas coladas
 
-**1. O `scan` escreve um.** Ele deduz o alfabeto e grava `nome.tbl`. Para jogo sem compressão isso
-basta — foi assim que Dragon Warrior e Castlevania foram traduzidos aqui, sem tabela fornecida.
+Muitos jogos guardam diálogo em linhas de N caracteres coladas, sem espaço na quebra: `If you are
+going` + `to see the king` vira `If you are goingto see the king` na ROM.
 
-**2. `table gaps` mostra o que falta.** O alfabeto cobre as letras; pontuação e códigos de controle
-ficam de fora. O comando lista os bytes desconhecidos **que aparecem cercados de texto legível** —
-ordenar por frequência pura só traz ruído de blocos gráficos:
+Tentei separar isso por dicionário e a tentativa se derrubou sozinha na medição: acerta `goingto` e
+destrói `Dragonlord`, que vira `Dragon lord`. Também `Wolflord` e `Starwyvern`. **Um modelo de
+linguagem lê o texto colado sem dificuldade e sabe que Dragonlord é um nome — porque lê a frase.**
 
-```
-$ rom-translator table gaps fx0.yaml
-0xFE  181 ocorrencias
-    Hello[$2E]<FE>Could I help youwi
-0x2E  106 ocorrencias
-    p youwith anything<2E>[$FC]What[$FE]would you li
-```
+O que o modelo *não* tem como saber é que a linha mede 16 caracteres: isso não está na língua, está
+na tela. Então a largura continua sendo medida, pela concentração das junções numa mesma coluna
+(20 de 23 no Faxanadu, nenhuma concentração no Dragon Warrior), e serve para re-quebrar a tradução
+na volta.
 
-Lendo isso: `0x2E` é o ponto final e `0xFE` a quebra de linha. Duas linhas no `.tbl` e pronto.
+### O portão que autoriza o resto
 
-**3. Para jogo comprimido, a tabela vem de fora.** Nenhuma estatística recupera a tabela de
-compressão de forma confiável — este projeto tentou e mediu 0 acertos em ROM real. As fontes são as
-comunidades de romhacking, que distribuem tabelas à parte. **Vale dizer o que eu verifiquei: dos
-cinco patches que baixei, nenhum trazia `.tbl` junto** — nem o do Chrono Trigger, nem os do Golden
-Sun, Faxanadu, Illusion of Gaia ou Final Fantasy III. Tabela é material separado, e às vezes o grupo
-simplesmente não publica.
+Antes de traduzir uma linha sequer, o `auto` reinsere o texto **original** e exige que a ROM volte
+byte a byte. Se a tabela deduzida for ambígua, isso falha aqui — barato — em vez de corromper o jogo
+num ponto que só aparece horas depois.
 
-## Recuperação de DTE/MTE
+Não é decorativo: numa tabela que montei à mão, mapeei dois bytes distintos para o mesmo apóstrofo e
+o portão travou a execução em 25 unidades.
 
-Jogos de 8 e 16 bits comprimem diálogo trocando pares frequentes por um único byte. A tabela dessas
-trocas mora no código do jogo, e é por isso que ferramentas de romhacking pedem um `.tbl` pronto.
+---
 
-`rom-translator dte` propõe as entradas apoiado num léxico do idioma de origem. **São propostas, não
-certezas** — e a honestidade aqui é o recurso principal, porque uma entrada errada corrompe a
-tradução inteira.
+## Medido contra traduções humanas
 
-Medido contra uma tabela conhecida (texto real do Dragon Warrior, compressão sintética de 16
-entradas): **7 recuperadas, 0 erradas**. Recall parcial, precisão total — o trade-off certo.
+Uma tradução de fã é um dataset rotulado: os tradutores marcaram, byte a byte, onde o texto está.
+`scripts/validate_patch.py` transforma qualquer par ROM + patch num gabarito. Quatro deles, quatro
+lições — e o valor de cada um está no que **quebrou**:
 
-Nas ROMs reais, dois resultados, e nenhum deles é uma vitória:
+| gabarito | o que mediu | o que quebrou |
+|---|---|---|
+| **Chrono Trigger** (SNES, CBT 1998) | recall de 94,1% | deu a primeira medida — e o viés que ela criou |
+| **Golden Sun** (GBA, 2010) | 6.923 palavras na área nova | a **métrica**: expande a ROM em 565 KB em vez de editar no lugar |
+| **Faxanadu** (NES, 2017) | recall de 54,1% | o **scanner**: texto picado tem teto |
+| **Illusion of Gaia** (SNES, 2010) | recall de 63,4% | provou que os 94,1% eram exceção |
 
-- **Dragon Warrior**: nenhuma proposta. É o resultado **certo** — o texto não é comprimido, não há
-  tabela a recuperar, e o algoritmo cala em vez de inventar.
-- **Chrono Trigger**: nenhuma proposta. É um **não-resultado**. O esquema de compressão do jogo
-  provavelmente não é DTE simples, e a amostra que talvez bastasse não termina em tempo útil — o
-  custo cresce com palavras × léxico × alinhamentos, e 20 mil palavras já passam de dois minutos
-  numa ROM de 4 MiB. Continua precisando de um `.tbl` fornecido.
+A janela de análise era de 256 bytes, escolhida contra o único gabarito que existia. Com mais dois
+ficou claro que o Chrono Trigger é a exceção:
 
-Duas versões anteriores foram descartadas por medição, não por gosto:
+| janela | Chrono Trigger | Illusion of Gaia | Faxanadu |
+|---:|---:|---:|---:|
+| 256 (antiga) | **94,1%** | 34,5% | 23,9% |
+| 64 (nova) | 93,5% | **63,4%** | **54,1%** |
 
-- **Dicionário tirado da própria ROM**: partia da ideia de que "sword" apareceria inteiro em algum
-  lugar e comprimido em outro. Não aparece — o compressor é determinístico. Recuperou **0 de 16**.
-- **Um voto por alinhamento**: uma palavra muito comprimida casa com centenas de palavras do léxico,
-  e contar cada uma deixava vencer o par mais comum do idioma. O byte de `th` recebeu 24 mil votos
-  para `ma`. Agora cada palavra vota uma vez, e só nos bytes em que **todos** os seus alinhamentos
-  concordam.
+O número antigo era um ajuste a um único jogo. Só apareceu como tal quando existiu um segundo ponto
+de medida.
 
-## Desenvolvimento
+---
+
+## O que uma tradução por LLM de verdade ensinou
+
+Rodado contra um Hermes Agent na rede local, em Dragon Warrior. Quatro defeitos apareceram no
+primeiro contato, e **nenhum era do modelo**:
+
+**Traduzia lixo com confiança.** O `--limit` pegava as primeiras unidades, que são as de offset
+baixo — gráfico que o scanner marcou como texto. O modelo traduziu `ihiyyA` para `Olá` e `wiyyyAwwy`
+para `Ei você`, invenções que seriam gravadas por cima dos gráficos. Um modelo de linguagem nunca
+responde "isso não é texto".
+
+**Eu apagava hífen em silêncio.** A tabela deduzida não tem `-`, e minha limpeza removia o caractere,
+produzindo `Oferecote`, `Dizse`, `trazerte`. O certo é dizer ao modelo quais caracteres existem — e
+que acentos são permitidos porque os glifos serão desenhados depois, mas pontuação não.
+
+**Ele ignora o limite de caracteres.** Uma segunda passada dizendo por quanto passou recupera só uma
+fração.
+
+**Ele engole lotes inteiros.** Uma rodada devolveu 30 de 30 linhas, a seguinte 12. Repetir as que
+faltaram em lotes menores recuperou 100 de 105 numa rodada completa.
+
+Resultado da rodada completa: **389 de 576 falas escritas, 75% dos caracteres do script**.
+
+---
+
+## Limites honestos
+
+**Compressão é o muro.** Recuperar a tabela de compressão de um jogo é engenharia reversa do
+descompressor dele. Nenhum atalho estatístico funcionou: a inferência aqui acerta 7 de 16 numa tabela
+sintética conhecida e **zero** nas ROMs comprimidas reais. Para esses jogos, o `.tbl` vem de fora — e
+verifiquei que dos cinco patches que baixei, nenhum trazia tabela junto.
+
+**O scanner tem teto com texto picado.** 54% no Faxanadu contra 93% no Chrono Trigger. Passar disso
+provavelmente exige outra abordagem, não outro ajuste de parâmetro.
+
+**Realocação depende de ponteiro.** Mover uma fala que não coube exige saber onde ela termina e quem
+aponta para ela. No Dragon Warrior o terminador foi descoberto (`0x52`), mas **não existe tabela de
+ponteiros** — procurei entrelaçada e dividida, até `min_run=4`. As mensagens são achadas contando
+terminadores, e aí não há ponteiro para reescrever.
+
+**A ferramenta nunca rodou o jogo.** Todas as verificações são de bytes: round-trip, checksum interno
+do SNES, patch reaplicando byte a byte. Nenhuma é comportamental.
+
+---
+
+## Comandos
 
 ```bash
+rom-translator triage    jogo.nes                    # vale a pena tentar?
+rom-translator auto      jogo.nes --to pt-BR         # a cadeia inteira
+
+rom-translator identify  jogo.smc                    # plataforma, mapeamento, hashes
+rom-translator scan      jogo.smc -o projeto.yaml    # acha o texto e deduz o alfabeto
+rom-translator dump      projeto.yaml -o script.json
+rom-translator preview   script.json --longest
+rom-translator verify    projeto.yaml script.json    # o dump volta byte-idêntico?
+rom-translator translate script.json --engine claude --to pt-BR
+rom-translator build     projeto.yaml script.json -o traduzida.smc
+rom-translator patch     jogo.smc traduzida.smc -o traducao.bps
+rom-translator apply     jogo.smc traducao.ips -o jogo-ptbr.smc
+
+rom-translator table gaps    projeto.yaml            # bytes que faltam na tabela, com contexto
+rom-translator font  show    jogo.nes                # desenha os tiles no terminal
+rom-translator font  accents projeto.yaml -o com-fonte.nes
+rom-translator pointers  projeto.yaml script.json
+rom-translator dte       projeto.yaml                # propõe entradas de compressão
+```
+
+### Motores de tradução
+
+| motor | para que serve |
+|---|---|
+| `claude` | API da Anthropic; melhor qualidade e melhor obediência ao limite de caracteres |
+| `openai` | qualquer servidor no formato OpenAI — Hermes Agent, LM Studio, vLLM, llama.cpp, `/v1` do Ollama |
+| `ollama` | Ollama nativo, uma linha por vez |
+| `file` | lê traduções prontas de um YAML — para traduzir à mão usando o resto do pipeline |
+| `dummy` | exercita a cadeia inteira sem gastar token |
+
+Chaves saem de `~/.config/secrets/` (`anthropic.env`, `hermes.env`) ou das variáveis de ambiente.
+
+### De onde vem o `.tbl`
+
+1. **O `scan` escreve um** — deduz o alfabeto e grava. Para jogo sem compressão isso basta.
+2. **`table gaps` mostra o que falta** — os bytes desconhecidos que aparecem *cercados de texto
+   legível*, com contexto suficiente para deduzir cada um:
+   ```
+   0xFE  181 ocorrencias
+       Hello[$2E]<FE>Could I help youwi
+   0x2E  106 ocorrencias
+       p youwith anything<2E>[$FC]What[$FE]would you li
+   ```
+   Lendo isso: `0x2E` é o ponto final e `0xFE` a quebra de linha.
+3. **Para jogo comprimido, vem de fora** — das comunidades de romhacking, que distribuem tabelas à
+   parte dos patches.
+
+---
+
+## Instalação
+
+```bash
+git clone https://github.com/duarte-gui/rom-translator
+cd rom-translator
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest
 ```
 
-Para usar o motor Claude, a chave vai em `~/.config/secrets/anthropic.env` (mode 600) como
-`ANTHROPIC_API_KEY=...`, ou na variável de ambiente. Rodadas longas aceitam `--notify`, que avisa
-no Telegram ao terminar.
+Python 3.11+. Dependências: `click`, `rich`, `numpy`, `pyyaml` — mais `anthropic` para o motor Claude.
 
-## Licença e ROMs
+## Exemplos
 
-Código sob MIT. O projeto não contém, não baixa e não distribui ROMs — entrada é a cópia do usuário,
-saída é um patch. É exatamente o modelo que as traduções de fã sempre usaram.
+- [`examples/dragon-warrior-ptbr/`](examples/dragon-warrior-ptbr/) — NES, com acentos desenhados
+- [`examples/castlevania-ptbr/`](examples/castlevania-ptbr/) — GBA, a terceira plataforma
+- [`examples/gabaritos/`](examples/gabaritos/) — o que cada tradução humana mediu, e o que quebrou
+
+## Licença
+
+MIT. O projeto não contém, não baixa e não distribui ROMs.

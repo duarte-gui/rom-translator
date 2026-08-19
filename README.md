@@ -117,6 +117,11 @@ doadoras não são "as que o português não usa", são **as que este jogo não 
 raridade no script inteiro, para que sacrificar custe o mínimo. O que ainda assim não couber perde o
 acento (`ação` → `acao`) em vez de perder a linha.
 
+Tradução que não couber no lugar é movida para espaço livre com os ponteiros reescritos — mas só
+quando dá para saber onde a frase termina. Mover uma string cujo fim foi adivinhado errado corrompe o
+jogo em silêncio, então o `auto` exige evidência forte (60% das frases fechando no mesmo byte) ou o
+`--terminator 0xNN`. A varredura de ponteiros só roda se algo de fato não couber.
+
 Sem chave de API, o motor `file` lê traduções prontas de um YAML — o pipeline inteiro serve também a
 quem quer traduzir cada linha à mão.
 
@@ -332,6 +337,34 @@ quem traduz.
 
 Letras com haste alta não têm onde receber o acento, e aí `font accents` **recusa** em vez de
 entregar um glifo ilegível.
+
+## De onde vem o `.tbl`
+
+O `.tbl` é o dicionário entre bytes da ROM e texto, e é a peça que decide tudo. Três caminhos:
+
+**1. O `scan` escreve um.** Ele deduz o alfabeto e grava `nome.tbl`. Para jogo sem compressão isso
+basta — foi assim que Dragon Warrior e Castlevania foram traduzidos aqui, sem tabela fornecida.
+
+**2. `table gaps` mostra o que falta.** O alfabeto cobre as letras; pontuação e códigos de controle
+ficam de fora. O comando lista os bytes desconhecidos **que aparecem cercados de texto legível** —
+ordenar por frequência pura só traz ruído de blocos gráficos:
+
+```
+$ rom-translator table gaps fx0.yaml
+0xFE  181 ocorrencias
+    Hello[$2E]<FE>Could I help youwi
+0x2E  106 ocorrencias
+    p youwith anything<2E>[$FC]What[$FE]would you li
+```
+
+Lendo isso: `0x2E` é o ponto final e `0xFE` a quebra de linha. Duas linhas no `.tbl` e pronto.
+
+**3. Para jogo comprimido, a tabela vem de fora.** Nenhuma estatística recupera a tabela de
+compressão de forma confiável — este projeto tentou e mediu 0 acertos em ROM real. As fontes são as
+comunidades de romhacking, que distribuem tabelas à parte. **Vale dizer o que eu verifiquei: dos
+cinco patches que baixei, nenhum trazia `.tbl` junto** — nem o do Chrono Trigger, nem os do Golden
+Sun, Faxanadu, Illusion of Gaia ou Final Fantasy III. Tabela é material separado, e às vezes o grupo
+simplesmente não publica.
 
 ## Recuperação de DTE/MTE
 

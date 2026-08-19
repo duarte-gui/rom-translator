@@ -666,18 +666,27 @@ def dte(project_path: Path, rom_override: Path | None, lexicon_path: Path | None
 @click.option("--translations", type=click.Path(exists=True, path_type=Path),
               help="para --engine file: YAML ou JSON com original -> traducao")
 @click.option("--no-accents", is_flag=True, help="nao tentar desenhar letras acentuadas")
+@click.option("--no-relocate", is_flag=True,
+              help="nao mover para espaco livre o que nao couber no lugar")
+@click.option("--terminator", type=lambda v: int(v, 0),
+              help="byte que fecha as frases, ex 0xFE -- necessario para realocar")
 @click.option("--force", is_flag=True, help="segue mesmo se a triagem reprovar")
 @click.option("--limit", type=int, help="traduz so as N primeiras unidades")
 @click.option("--notify", is_flag=True, help="avisa no Telegram ao terminar")
 def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: str,
          game: str, glossary: Path | None, translations: Path | None,
-         no_accents: bool, force: bool, limit: int | None, notify: bool) -> None:
+         no_accents: bool, no_relocate: bool, terminator: int | None,
+         force: bool, limit: int | None, notify: bool) -> None:
     """Da ROM ao patch num comando so.
 
     Recusa jogo que a triagem reprova -- texto comprimido nao tem como ser
     traduzido sem a tabela de compressao, e insistir produz lixo com cara de
     progresso. E confere o round-trip *antes* de traduzir: se reinserir o texto
     original nao devolve a ROM byte a byte, nada do que vier depois presta.
+
+    Traducao que nao couber no espaco original e movida para espaco livre, com
+    os ponteiros reescritos -- mas so quando da para saber onde a frase termina.
+    A varredura de ponteiros so roda se algo de fato nao couber.
     """
     from .auto import run_auto
 
@@ -695,8 +704,9 @@ def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: st
         report = run_auto(
             rom_path=rom_path, out_dir=out_dir, engine_name=engine_name,
             target_lang=target_lang, game=game, glossary=palavras,
-            engine_kwargs=extras, accents=not no_accents, force=force,
-            limit=limit, log=lambda m: console.print(f"[dim]·[/dim] {m}"),
+            engine_kwargs=extras, accents=not no_accents,
+            relocate=not no_relocate, terminator=terminator, force=force,
+            limit=limit, log=lambda m: console.print(f"[dim]·[/dim] {escape(m)}"),
         )
     except Exception as exc:
         _fail(str(exc))
@@ -710,6 +720,7 @@ def auto(rom_path: Path, out_dir: Path | None, engine_name: str, target_lang: st
     console.print(
         f"\n[green]pronto[/green] {report.escritas:,} unidades escritas"
         + (f", {report.nao_couberam:,} nao couberam" if report.nao_couberam else "")
+        + (f", {report.realocadas:,} realocadas" if report.realocadas else "")
         + (f", {len(report.acentos)} acentos desenhados" if report.acentos else "")
         + (f", {report.transliteradas:,} sem acento por falta de tile"
            if report.transliteradas else "")
@@ -776,6 +787,67 @@ def triage(rom_path: Path, window: int, stride: int, threshold: float) -> None:
     else:
         console.print("\n[dim]proximo passo:[/dim] procure um .tbl publicado para este jogo "
                       "e passe em --table; sem ele o dialogo nao e legivel")
+
+
+@main.group()
+def table() -> None:
+    """Inspeciona e completa a tabela de caracteres."""
+
+
+@table.command("gaps")
+@click.argument("project_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--rom", "rom_override", type=click.Path(exists=True, path_type=Path))
+@click.option("-n", "--count", default=20, show_default=True)
+@click.option("--context", default=24, show_default=True,
+              help="quantos caracteres mostrar em volta de cada ocorrencia")
+def table_gaps(project_path: Path, rom_override: Path | None, count: int,
+               context: int) -> None:
+    """Lista os bytes que a tabela ainda nao conhece, com exemplos em volta.
+
+    E o passo que falta para completar um .tbl a mao: o `scan` deduz o alfabeto,
+    e o que sobra -- pontuacao, codigos de controle, pares comprimidos -- aparece
+    aqui por frequencia, com contexto suficiente para deduzir cada um.
+    """
+    project = Project.load(project_path)
+    rom = Rom.load(rom_override or project.rom_path)
+    tabela = project.load_table(project_path.parent)
+    data = bytes(rom.data)
+
+    letras = tabela.letter_bytes
+    conhecidos = {raw[0] for raw in tabela.entries if len(raw) == 1}
+    # so conta o byte quando ele esta *cercado de texto legivel*. Ordenar por
+    # frequencia pura enche a lista de ruido de blocos graficos, que sao byte
+    # desconhecido do inicio ao fim e nao ensinam nada
+    ocorrencias: dict[int, list[int]] = {}
+    for bloco in project.blocks:
+        inicio, fim = bloco.start, min(bloco.end, len(data))
+        for offset in range(inicio + 8, fim - 8):
+            byte = data[offset]
+            if byte in conhecidos:
+                continue
+            vizinhos = sum(
+                1 for o in range(offset - 8, offset + 9) if data[o] in letras
+            )
+            if vizinhos >= 8:
+                ocorrencias.setdefault(byte, []).append(offset)
+
+    if not ocorrencias:
+        console.print("nenhum byte desconhecido aparece cercado de texto legivel")
+        return
+
+    ordenados = sorted(ocorrencias.items(), key=lambda kv: -len(kv[1]))
+    console.print(f"{len(ordenados)} bytes sem mapeamento aparecem dentro de texto\n")
+    for byte, posicoes in ordenados[:count]:
+        console.print(f"[cyan]0x{byte:02X}[/cyan]  {len(posicoes):,} ocorrencias")
+        for posicao in posicoes[:2]:
+            inicio = max(0, posicao - context)
+            antes = tabela.decode(data, inicio, posicao - inicio, stop_at_end=False).text
+            depois = tabela.decode(data, posicao + 1, context, stop_at_end=False).text
+            console.print(f"    {escape(antes)}[yellow]<{byte:02X}>[/yellow]{escape(depois)}")
+    console.print(
+        f"\n[dim]para mapear, acrescente linhas ao {project.table_path}: "
+        "`2E=.` para um caractere, `/00=[END]` para fim de frase[/dim]"
+    )
 
 
 @main.group()

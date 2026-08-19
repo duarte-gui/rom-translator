@@ -41,6 +41,10 @@ class AutoReport:
     traduzidas: int = 0
     escritas: int = 0
     nao_couberam: int = 0
+    realocadas: int = 0
+    terminador: int | None = None
+    tabelas_de_ponteiro: int = 0
+    motivo_sem_realocar: str = ""
     acentos: list[tuple[str, int]] = field(default_factory=list)
     transliteradas: int = 0
     saidas: dict[str, Path] = field(default_factory=dict)
@@ -74,6 +78,54 @@ def escolher_doadores(
     return candidatas[: len(precisa)]
 
 
+#: fracao minima das frases que precisam terminar no mesmo byte para que ele
+#: seja aceito como terminador sem o usuario dizer. Medido em tres ROMs, o
+#: melhor candidato ficou em 44% (Faxanadu), 22% (Dragon Warrior) e 19%
+#: (Castlevania) -- ou seja, na pratica nenhuma passa, e e esse o ponto: mover
+#: uma string cujo fim eu adivinhei errado corrompe o jogo em silencio
+CONFIANCA_TERMINADOR = 0.60
+
+
+def inferir_terminador(
+    data: bytes, regions, tabela: Table
+) -> tuple[int, float] | None:
+    """Byte que fecha as frases, se houver um dominante o bastante.
+
+    Devolve None quando a evidencia e fraca -- e quase sempre e. Sem terminador
+    o realocador se recusa a mover a string, o que e o comportamento certo: o
+    jogo leria alem dela ate topar com um byte de fim por acaso.
+    """
+    import numpy as np
+
+    letras = tabela.letter_bytes
+    if not letras:
+        return None
+    arr = np.frombuffer(data, dtype=np.uint8)
+    e_letra = np.zeros(256, dtype=bool)
+    for b in letras:
+        e_letra[b] = True
+
+    depois: Counter[int] = Counter()
+    for region in regions:
+        trecho = arr[region.start : region.end]
+        marca = e_letra[trecho]
+        i = 0
+        while i < len(trecho):
+            if not marca[i]:
+                i += 1
+                continue
+            inicio = i
+            while i < len(trecho) and marca[i]:
+                i += 1
+            if i - inicio >= 4 and i < len(trecho):
+                depois[int(trecho[i])] += 1
+    total = sum(depois.values())
+    if not total:
+        return None
+    byte, quantas = depois.most_common(1)[0]
+    return byte, quantas / total
+
+
 def acentos_necessarios(traducoes: list[str], tabela: Table) -> list[str]:
     """Letras acentuadas que aparecem nas traducoes e a tabela ainda nao tem."""
     from .core.tiles import ACCENTS
@@ -93,6 +145,8 @@ def run_auto(
     glossary: dict[str, str] | None = None,
     engine_kwargs: dict | None = None,
     accents: bool = True,
+    relocate: bool = True,
+    terminator: int | None = None,
     force: bool = False,
     limit: int | None = None,
     min_chars: int = 6,
@@ -190,9 +244,23 @@ def run_auto(
 
     script.save(out_dir / f"{nome}.script.json")
 
-    # 8. reinsercao e patch
-    relatorio = insert(rom, script, tabela)
+    # 8. reinsercao. Primeiro no lugar, numa copia, so para saber se sobra algo
+    ensaio = insert(rom.copy(), script, tabela)
+    relocador = None
+    if ensaio.overflow and relocate:
+        relocador = _preparar_realocacao(
+            rom, data, script, tabela, plugin, det, regions, terminator, report, log
+        )
+    elif ensaio.overflow:
+        report.motivo_sem_realocar = "realocacao desligada"
+
+    # a tabela pode ter ganhado acentos e o terminador pelo caminho; sem regravar,
+    # o .tbl entregue decodificaria a ROM traduzida de forma errada
+    caminho_tabela.write_text(tabela.dumps(), encoding="utf-8")
+
+    relatorio = insert(rom, script, tabela, relocator=relocador)
     report.escritas = relatorio.written
+    report.realocadas = relatorio.relocated
     report.nao_couberam = len(relatorio.overflow)
     if det.platform == "snes":
         from .platforms.snes import fix_checksum
@@ -214,8 +282,87 @@ def run_auto(
     if ips:
         report.saidas["ips"] = ips
     log(f"escritas {relatorio.written:,} unidades"
+        + (f", {relatorio.relocated:,} realocadas" if relatorio.relocated else "")
         + (f", {len(relatorio.overflow):,} nao couberam" if relatorio.overflow else ""))
+    if relatorio.overflow and report.motivo_sem_realocar:
+        log(f"  nao deu para mover as que sobraram: {report.motivo_sem_realocar}")
     return report
+
+
+def _preparar_realocacao(
+    rom, data, script, tabela, plugin, det, regions, terminator, report, log
+):
+    """Monta o realocador, ou explica por que nao deu.
+
+    Custa uma varredura de ponteiros pela ROM inteira, entao so roda quando
+    alguma traducao de fato nao coube -- nao ha por que pagar isso a toa.
+    """
+    from .core.insert import Relocator
+    from .core.pointers import find_pointers
+    from .core.space import SpaceAllocator, find_free_space
+
+    # o terminador e obrigatorio: sem ele o jogo le alem da string movida
+    if terminator is None:
+        achado = inferir_terminador(data, regions, tabela)
+        if achado and achado[1] >= CONFIANCA_TERMINADOR:
+            terminator, confianca = achado
+            log(f"terminador deduzido: 0x{terminator:02X} ({confianca:.0%} das frases)")
+        else:
+            visto = f" (melhor palpite 0x{achado[0]:02X}, so {achado[1]:.0%})" if achado else ""
+            report.motivo_sem_realocar = (
+                f"nao sei qual byte fecha as frases{visto}; passe --terminator 0xNN"
+            )
+            return None
+    report.terminador = terminator
+
+    # as unidades precisam incluir o terminador para poderem ser movidas
+    tabela.entries[bytes([terminator])] = "[END]"
+    tabela.end_tokens.add(bytes([terminator]))
+    tabela.reindex()
+    estendidas = 0
+    for u in script.units:
+        fim = u.offset + u.length
+        if fim < len(data) and data[fim] == terminator:
+            u.length += 1
+            u.max_len += 1
+            u.text += "[END]"
+            if u.translation is not None:
+                u.translation += "[END]"
+            estendidas += 1
+    log(f"{estendidas:,} unidades passam a incluir o terminador")
+
+    alvos = {u.offset: u.id for u in script.units}
+    especificacoes: dict[int, object] = {}
+    tabelas = 0
+    for spec in plugin.pointer_specs(det):
+        for tabela_ptr in find_pointers(data, alvos, plugin, det, spec, min_run=8):
+            tabelas += 1
+            for offset in tabela_ptr.entries:
+                especificacoes[offset] = spec
+    report.tabelas_de_ponteiro = tabelas
+    por_alvo: dict[int, list[int]] = {}
+    for spec in plugin.pointer_specs(det):
+        for tabela_ptr in find_pointers(data, alvos, plugin, det, spec, min_run=8):
+            for offset, alvo in tabela_ptr.entries.items():
+                por_alvo.setdefault(alvo, []).append(offset)
+    for u in script.units:
+        u.pointers = sorted(por_alvo.get(u.offset, []))
+    com_ponteiro = sum(1 for u in script.units if u.pointers)
+    log(f"ponteiros: {tabelas} tabelas, {com_ponteiro:,} unidades enderecadas")
+    if not especificacoes:
+        report.motivo_sem_realocar = "nenhuma tabela de ponteiros encontrada"
+        return None
+
+    cabecalho = det.details.get("header_offset")
+    excluir = [(cabecalho, cabecalho + 64)] if cabecalho is not None else []
+    regioes = find_free_space(data, min_run=64, exclude=excluir)
+    alocador = SpaceAllocator(regioes, bank_size=plugin.bank_size(det))
+    log(f"espaco livre: {alocador.total_free:,} bytes em {len(alocador.regions)} trechos")
+    if not alocador.total_free:
+        report.motivo_sem_realocar = "nao ha espaco livre na ROM"
+        return None
+    return Relocator(rom=rom, table=tabela, plugin=plugin, det=det,
+                     allocator=alocador, specs=especificacoes)
 
 
 def _traduzir(engine, unidades, log) -> None:

@@ -152,3 +152,109 @@ def test_traducao_com_caractere_fora_da_tabela_nao_e_escrita(tmp_path):
                       log=lambda m: None)
     assert report.traduzidas == 1
     assert report.escritas == 0
+
+
+def _rom_com_ponteiros(tmp_path):
+    """ROM sintetica com frases terminadas, uma tabela de ponteiros e espaco livre.
+
+    Nenhuma das ROMs reais testadas ate agora exercita a realocacao: ou nao da
+    para saber o terminador, ou a busca de ponteiros nao acha tabela. Este caso
+    existe para provar que a ligacao no `auto` esta certa mesmo assim.
+    """
+    frases = [
+        "the king waits for thee in the castle beyond the river",
+        "travel not to the south for the monsters are fierce there",
+        "many brave warriors have perished upon this dangerous quest",
+        "thou must find the sword before facing the ancient dragon",
+        "the princess is held within the cave to the far east",
+        "return the water to the fountain and the town shall live",
+        "a magic cane lies buried at the foot of the old tree",
+        "speak with the elder and he shall tell thee of the globe",
+        "the golden harp beckons to the creatures of the darkness",
+        "rest here and thy wounds shall heal before the long road",
+    ]
+    corpo = bytearray()
+    offsets = []
+    for frase in frases * 14:  # precisa passar de 4 KiB para a deducao de alfabeto opinar
+        offsets.append(0x400 + len(corpo))
+        corpo += frase.encode("ascii") + b"\x00"
+
+    dados = bytearray(b"\x00" * 0x400) + corpo
+    dados += b"\x00" * ((0x100 - len(dados) % 0x100) % 0x100)
+    tabela_ptr = len(dados)
+    for offset in offsets:
+        dados += offset.to_bytes(3, "little")
+    dados += b"\xff" * 0x800  # espaco livre para receber o texto movido
+
+    caminho = tmp_path / "componteiros.bin"
+    caminho.write_bytes(bytes(dados))
+    return caminho, tabela_ptr, len(offsets)
+
+
+def test_realoca_quando_a_traducao_nao_cabe(tmp_path):
+    import json
+
+    from rom_translator.core.rom import Rom
+    from rom_translator.core.table import Table
+
+    rom, _, _ = _rom_com_ponteiros(tmp_path)
+    saida = tmp_path / "s"
+    primeiro = run_auto(rom, saida, engine_name="dummy", accents=False,
+                        terminator=0x00, log=lambda m: None)
+    assert primeiro.round_trip_ok
+
+    script = Script.load(next(saida.glob("*.script.json")))
+    alvo = max(script.units, key=lambda u: len(u.text))
+    # sem [END]: a tabela so ganha o terminador depois, quando a realocacao e preparada
+    longa = alvo.text + " e mais texto que nao cabe no lugar"
+    arquivo = tmp_path / "t.json"
+    arquivo.write_text(json.dumps({alvo.text: longa}), encoding="utf-8")
+
+    report = run_auto(rom, tmp_path / "s2", engine_name="file",
+                      engine_kwargs={"path": arquivo}, accents=False,
+                      terminator=0x00, log=lambda m: None)
+    # a mesma frase se repete na ROM, entao todas as copias sao movidas
+    repeticoes = sum(1 for u in script.units if u.text == alvo.text)
+    assert report.tabelas_de_ponteiro > 0, "devia ter achado a tabela de ponteiros"
+    assert report.realocadas == repeticoes, report.motivo_sem_realocar
+    assert report.nao_couberam == 0
+
+    # o original nao pode ter sido tocado onde a string cabia
+    traduzida = bytes(Rom.load(report.saidas["rom"]).data)
+    assert len(traduzida) == len(rom.read_bytes()), "realocar nao expande a ROM"
+
+
+def test_o_ponteiro_passa_a_apontar_para_o_texto_movido(tmp_path):
+    import json
+
+    from rom_translator.core.rom import Rom
+    from rom_translator.core.table import Table
+
+    rom, tabela_ptr, quantos_ponteiros = _rom_com_ponteiros(tmp_path)
+    saida = tmp_path / "s"
+    run_auto(rom, saida, engine_name="dummy", accents=False, terminator=0x00,
+             log=lambda m: None)
+    script = Script.load(next(saida.glob("*.script.json")))
+    alvo = max(script.units, key=lambda u: len(u.text))
+    longa = alvo.text + " com bastante texto sobrando aqui"
+    arquivo = tmp_path / "t.json"
+    arquivo.write_text(json.dumps({alvo.text: longa}), encoding="utf-8")
+
+    report = run_auto(rom, tmp_path / "s2", engine_name="file",
+                      engine_kwargs={"path": arquivo}, accents=False,
+                      terminator=0x00, log=lambda m: None)
+    assert report.realocadas > 0
+
+    traduzida = bytes(Rom.load(report.saidas["rom"]).data)
+    tabela = Table.load(report.saidas["tabela"])
+    # acha o ponteiro que mudou e le o que ha no destino
+    original = rom.read_bytes()
+    mudou = [
+        i for i in range(tabela_ptr, tabela_ptr + quantos_ponteiros * 3, 3)
+        if traduzida[i : i + 3] != original[i : i + 3]
+    ]
+    assert len(mudou) == report.realocadas, "um ponteiro reescrito por string movida"
+    for posicao in mudou:
+        destino = int.from_bytes(traduzida[posicao : posicao + 3], "little")
+        lido = tabela.decode(traduzida, destino, 200, stop_at_end=True).text
+        assert lido.replace("[END]", "") == longa, "o ponteiro tem que achar o texto novo"

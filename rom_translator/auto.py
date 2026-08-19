@@ -13,6 +13,7 @@ Duas travas moldam este fluxo, e as duas existem porque falhar depois sai caro:
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
@@ -49,6 +50,7 @@ class AutoReport:
     nomes_proprios: list[str] = field(default_factory=list)
     acentos: list[tuple[str, int]] = field(default_factory=list)
     transliteradas: int = 0
+    espremidas: int = 0
     encurtadas: int = 0
     repetidas: int = 0
     saidas: dict[str, Path] = field(default_factory=dict)
@@ -324,27 +326,6 @@ def run_auto(
         _traduzir(engine, faltando, largura, log)
         engine.config.batch_size = anterior
         report.repetidas += len(faltando) - sum(1 for u in faltando if not u.translated)
-    engine.close()
-    # segunda passada so nas que nao couberam: o modelo respeita melhor o limite
-    # quando ve por quanto passou
-    estouradas = [
-        u for u in script.units
-        if u.translated and tabela.can_encode(u.translation)
-        and len(tabela.encode(u.translation)) > u.max_len
-    ]
-    if estouradas:
-        log(f"{len(estouradas):,} traducoes passaram do limite -- pedindo mais curtas")
-        antes = {u.id: u.translation for u in estouradas}
-        _encurtar(engine, estouradas, tabela, largura, log)
-        report.encurtadas = sum(
-            1 for u in estouradas
-            if u.translation != antes[u.id]
-            and tabela.can_encode(u.translation)
-            and len(tabela.encode(u.translation)) <= u.max_len
-        )
-        if report.encurtadas:
-            log(f"  {report.encurtadas:,} passaram a caber")
-
     traduzidas = [u for u in script.units if u.translated]
     report.traduzidas = len(traduzidas)
     log(f"traduzidas {len(traduzidas):,} unidades")
@@ -372,6 +353,11 @@ def run_auto(
             u.translation = None
     if report.transliteradas:
         log(f"{report.transliteradas:,} traducoes perderam o acento por falta de tile")
+
+    # 7b. so agora da para medir o estouro de verdade: a tabela ja tem os acentos
+    #     desenhados e as transliteracoes ja mudaram o tamanho das linhas
+    _reapertar(engine, script, tabela, largura, report, log)
+    engine.close()
 
     script.save(out_dir / f"{nome}.script.json")
 
@@ -532,6 +518,74 @@ def _traduzir(engine, unidades, largura, log) -> None:
             u.translation = redobrar(traduzido, largura) if largura else traduzido
 
 
+def _espremer(texto: str, origem: str, tabela, max_len: int) -> str | None:
+    """Tira a folga mecanica da traducao, sem trocar uma palavra sequer.
+
+    Espaco duplicado, espaco antes de pontuacao, espaco sobrando na ponta e
+    ponto final que o modelo acrescentou por conta propria -- o original nao
+    tinha. Devolve None quando nao sobra folga: ai so trocando palavra, e isso
+    e trabalho do modelo.
+    """
+    apertado = " ".join(texto.split())
+    apertado = re.sub(r"\s+([.,!?;:])", r"\1", apertado)
+    if apertado.endswith(".") and not origem.rstrip().endswith("."):
+        apertado = apertado[:-1].rstrip()
+    if not apertado or apertado == texto or not tabela.can_encode(apertado):
+        return None
+    return apertado if len(tabela.encode(apertado)) <= max_len else None
+
+
+def _reapertar(engine, script, tabela, largura, report, log) -> None:
+    """Ultima passada nas traducoes que nao cabem.
+
+    Precisa rodar *depois* dos acentos e da transliteracao, que sao justamente
+    as etapas que mudam o tamanho da linha: medir antes delas media o texto
+    errado, e uma traducao com acento nem era codificavel ainda, entao escapava
+    do filtro inteira.
+
+    Medido contra a traducao humana do Dragon Warrior: das 106 que estouravam,
+    41 passavam por 1 ou 2 caracteres -- `CONTINUE` virando `CONTINUAR`.
+    """
+    def estouro(u) -> int:
+        if not u.translated or not tabela.can_encode(u.translation):
+            return 0
+        return len(tabela.encode(u.translation)) - u.max_len
+
+    estouradas = [u for u in script.units if estouro(u) > 0]
+    if not estouradas:
+        return
+    apertadas = sum(1 for u in estouradas if estouro(u) <= 2)
+    log(f"{len(estouradas):,} traducoes passaram do limite "
+        f"({apertadas:,} por 1 ou 2 caracteres)")
+
+    # o que da para resolver sem gastar token vem primeiro
+    for u in estouradas:
+        apertado = _espremer(u.translation, u.text, tabela, u.max_len)
+        if apertado is not None:
+            u.translation = apertado
+            report.espremidas += 1
+    if report.espremidas:
+        log(f"  {report.espremidas:,} couberam so tirando espaco e pontuacao sobrando")
+
+    faltam = [u for u in estouradas if estouro(u) > 0]
+    if not faltam:
+        return
+    antes = {u.id: u.translation for u in faltam}
+    # duas rodadas: um estouro de 1 caractere quase sempre sai na segunda, e
+    # cada rodada ve por quanto a anterior passou
+    for rodada in range(2):
+        alvo = [u for u in faltam if estouro(u) > 0]
+        if not alvo:
+            break
+        log(f"  pedindo {len(alvo):,} mais curtas (rodada {rodada + 1})")
+        _encurtar(engine, alvo, tabela, largura, log)
+    report.encurtadas = sum(
+        1 for u in faltam if u.translation != antes[u.id] and estouro(u) <= 0
+    )
+    if report.encurtadas:
+        log(f"  {report.encurtadas:,} passaram a caber")
+
+
 def _encurtar(engine, unidades, tabela, largura, log) -> None:
     """Repede as traducoes que nao couberam, dizendo por quanto passaram."""
     from .core.wrap import redobrar
@@ -547,8 +601,11 @@ def _encurtar(engine, unidades, tabela, largura, log) -> None:
             tokens[u.id] = marcas
             pedidos.append(TranslationRequest(
                 id=u.id, text=texto, max_chars=u.max_len,
-                context=f"a traducao anterior passou {excesso} caracteres do limite "
-                        f"de {u.max_len}; reescreva mais curta sem cortar palavra",
+                context=f"'{u.translation}' passou {excesso} de {u.max_len} "
+                        f"caracteres. Cabem {u.max_len}, contando espaco e "
+                        f"pontuacao. Reescreva com no maximo {u.max_len}: troque "
+                        f"palavra por sinonimo mais curto, nunca corte no meio "
+                        f"nem abrevie com ponto",
             ))
         try:
             resultados = engine.translate_batch(pedidos)
@@ -560,8 +617,15 @@ def _encurtar(engine, unidades, tabela, largura, log) -> None:
                 continue
             novo = unmask_controls(r.text, tokens[u.id])
             novo = redobrar(novo, largura) if largura else novo
-            if tabela.can_encode(novo) and len(tabela.encode(novo)) <= u.max_len:
-                u.translation = novo
+            # o modelo devolve a linha ainda com folga mecanica e as vezes com
+            # um acento que esta tabela nao tem: as duas coisas tem conserto
+            # antes de desistir da resposta
+            for tentativa in (novo, _espremer(novo, u.text, tabela, u.max_len),
+                              sem_acento(novo)):
+                if (tentativa and tabela.can_encode(tentativa)
+                        and len(tabela.encode(tentativa)) <= u.max_len):
+                    u.translation = tentativa
+                    break
 
 
 def _acentuar(rom, tabela, script, traduzidas, plugin, det, caminho_tabela, report, log) -> None:

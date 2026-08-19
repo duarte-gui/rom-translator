@@ -3,7 +3,8 @@
 import pytest
 
 from rom_translator.auto import (
-    acentos_necessarios, escolher_doadores, run_auto, sem_acento,
+    AutoReport, _espremer, _reapertar, acentos_necessarios, escolher_doadores,
+    run_auto, sem_acento,
 )
 from rom_translator.core.script import Script, Unit
 from rom_translator.core.table import Table, ascii_table
@@ -284,3 +285,78 @@ def test_nome_proprio_no_inicio_da_frase_nao_conta():
         Unit(id="u", offset=0, length=1, text="Castle guards stand here", max_len=1),
     ])
     assert "Castle" not in nomes_proprios(script, {"guards", "stand", "here"})
+
+
+# --- reaperto: o estouro de 1 ou 2 caracteres ---------------------------------
+
+
+def _tabela_simples() -> Table:
+    return ascii_table()
+
+
+def test_espremer_tira_espaco_duplicado():
+    t = _tabela_simples()
+    assert _espremer("Bem  vindo   a Kol", "Welcome to Kol", t, 16) == "Bem vindo a Kol"
+
+
+def test_espremer_tira_ponto_que_o_modelo_inventou():
+    t = _tabela_simples()
+    # o original nao termina em ponto, entao o ponto e folga
+    assert _espremer("Boa noite.", "Good night", t, 9) == "Boa noite"
+
+
+def test_espremer_preserva_ponto_que_o_original_tinha():
+    t = _tabela_simples()
+    # aqui o ponto e do texto, nao e folga: nao ha o que espremer
+    assert _espremer("Boa noite.", "Good night.", t, 9) is None
+
+
+def test_espremer_desiste_quando_nao_ha_folga():
+    t = _tabela_simples()
+    assert _espremer("CONTINUAR", "CONTINUE", t, 8) is None
+
+
+def test_espremer_nao_devolve_o_que_continua_estourando():
+    t = _tabela_simples()
+    # da para tirar um espaco, mas ainda assim nao cabe em 5
+    assert _espremer("um  dois", "one two", t, 5) is None
+
+
+def test_reapertar_conserta_sozinho_o_que_e_so_espaco():
+    t = _tabela_simples()
+    script = Script(units=[
+        Unit(id="u0", offset=0, length=15, text="Welcome to Kol",
+             max_len=15, translation="Bem  vindo a Kol"),
+    ])
+    report = AutoReport()
+    chamou = []
+    _reapertar(_engine_que_falha(chamou), script, t, None, report, lambda *_: None)
+    assert script.units[0].translation == "Bem vindo a Kol"
+    assert report.espremidas == 1
+    assert not chamou, "nao devia gastar o modelo no que espaco resolve"
+
+
+def test_reapertar_ignora_o_que_ja_cabe():
+    t = _tabela_simples()
+    script = Script(units=[
+        Unit(id="u0", offset=0, length=20, text="Welcome",
+             max_len=20, translation="Bem vindo"),
+    ])
+    report = AutoReport()
+    chamou = []
+    _reapertar(_engine_que_falha(chamou), script, t, None, report, lambda *_: None)
+    assert report.espremidas == 0 and report.encurtadas == 0
+    assert not chamou
+
+
+def _engine_que_falha(registro):
+    """Motor que grita se for chamado -- serve para provar que nao foi."""
+    class _Motor:
+        class config:
+            batch_size = 8
+
+        def translate_batch(self, pedidos):
+            registro.append(pedidos)
+            raise AssertionError("nao devia chamar o modelo")
+
+    return _Motor()

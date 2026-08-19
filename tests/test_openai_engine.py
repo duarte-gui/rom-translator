@@ -81,3 +81,14 @@ def test_lote_vazio_nao_chama_o_servidor(monkeypatch):
     motor = OpenAICompatEngine(EngineConfig(), base_url="http://x")
     monkeypatch.setattr(motor, "_chamar", lambda *a, **k: pytest.fail("nao devia chamar"))
     assert motor.translate_batch([]) == []
+
+
+def test_base_url_com_v1_nao_vira_v1_v1():
+    """Colar o endereco com /v1 da 404 em toda linha, e em silencio."""
+    motor = OpenAICompatEngine(base_url="http://host:8642/v1", model="m")
+    assert motor.base_url == "http://host:8642"
+
+
+def test_base_url_sem_v1_fica_como_esta():
+    motor = OpenAICompatEngine(base_url="http://host:8642/", model="m")
+    assert motor.base_url == "http://host:8642"

@@ -48,6 +48,11 @@ class OpenAICompatEngine(TranslationEngine):
         self.base_url = (base_url or os.environ.get("OPENAI_BASE_URL") or "").rstrip("/")
         if not self.base_url:
             raise ValueError("o motor 'openai' precisa de --base-url")
+        # o caminho ja inclui /v1; quem copia o endereco da documentacao do
+        # servidor traz o /v1 junto e ganha um 404 em toda linha, sem mensagem
+        # nenhuma -- so um lote vazio atras do outro
+        if self.base_url.endswith("/v1"):
+            self.base_url = self.base_url[:-3]
         self.api_key = api_key or _chave_do_ambiente()
         self.model = model
         self.timeout = timeout

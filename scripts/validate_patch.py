@@ -108,7 +108,68 @@ def main() -> int:
     if len(patched) > len(original):
         print(f"  ROM expandida pelo tradutor: +{len(patched) - len(original):,} bytes")
 
-    print("\n3. recall do scanner")
+    expandiu = len(patched) - len(original)
+    if expandiu > 0:
+        print("\n3. scanner sobre a AREA NOVA (o tradutor expandiu a ROM)")
+        # Medir recall pelo diff nao serve aqui: quem expande quase nao mexe no
+        # original -- prende o texto novo no fim e desvia o codigo para la. Foi o
+        # que Golden Sun revelou: 565 KB acrescentados e 69 bytes alterados.
+        novos = find_text_regions(patched, limits=[(len(original), len(patched))])
+        cobertura = sum(r.length for r in novos) / expandiu if expandiu else 0.0
+        print(f"  {len(novos):,} blocos, {cobertura:.0%} da area nova sinalizada como texto")
+        guess_novo = guess_alphabet(patched, novos)
+        metrics |= {"expanded_bytes": expandiu, "expanded_text_fraction": cobertura,
+                    "expanded_blocks": len(novos)}
+        results.append(check(
+            f"scanner acha texto na area nova ({cobertura:.0%})",
+            cobertura >= 0.20,
+            "-- e la que a traducao vive",
+        ))
+        if guess_novo is not None:
+            upper_novo = (f"0x{guess_novo.upper_base:02X}"
+                          if guess_novo.upper_base is not None else "-")
+            print(f"  alfabeto do texto novo: espaco=0x{guess_novo.space:02X} "
+                  f"a-z=0x{guess_novo.lower_base:02X} A-Z={upper_novo} "
+                  f"({guess_novo.word_hits} palavras contra {guess_novo.runner_up_hits})")
+            tabela_nova = Table.parse(guess_novo.as_table_source())
+            melhor = max(novos, key=lambda r: r.score)
+            amostra = tabela_nova.decode(patched, melhor.start + 30, 76,
+                                         stop_at_end=False).text
+            print(f"  amostra: {amostra!r}")
+            metrics |= {"expanded_word_hits": guess_novo.word_hits}
+
+            # bytes que aparecem no meio de palavras mas nao estao no alfabeto:
+            # candidatos a glifo acentuado que o tradutor criou
+            letras = tabela_nova.letter_bytes
+            acentos: dict[int, int] = {}
+            for region in novos:
+                trecho = patched[region.start : region.end]
+                for i in range(1, len(trecho) - 1):
+                    if (trecho[i] not in letras and trecho[i - 1] in letras
+                            and trecho[i + 1] in letras):
+                        acentos[trecho[i]] = acentos.get(trecho[i], 0) + 1
+            top = sorted(acentos.items(), key=lambda kv: -kv[1])[:10]
+            if top:
+                print("  bytes no meio de palavras fora do alfabeto "
+                      "(candidatos a acento criado pelo tradutor):")
+                # muitos tradutores usam Latin-1 direto, entao vale tentar nomear
+                nomes = []
+                latin1 = 0
+                for byte, quantas in top:
+                    letra = bytes([byte]).decode("latin-1")
+                    if 0xC0 <= byte < 0x100 and letra.isalpha():
+                        nomes.append(f"0x{byte:02X}={letra}({quantas}x)")
+                        latin1 += quantas
+                    else:
+                        nomes.append(f"0x{byte:02X}=?({quantas}x)")
+                print("    " + "  ".join(nomes))
+                metrics["accent_candidates"] = {f"0x{b:02X}": n for b, n in top}
+                if latin1:
+                    print(f"    -> {latin1:,} ocorrencias batem com Latin-1: o tradutor "
+                          "acentuou usando a propria tabela do padrao")
+                    metrics["latin1_accent_occurrences"] = latin1
+
+    print("\n3b. recall do scanner no que mudou dentro do original")
     limits = plugin.text_regions(original, det)
     regions = find_text_regions(original, limits=limits)
     marked = bytearray(len(original))
@@ -124,7 +185,11 @@ def main() -> int:
     metrics |= {"scanner_recall": recall, "scanner_flagged": flagged,
                 "scanner_blocks": len(regions)}
     print(f"  {len(regions):,} blocos, {flagged:.1%} da ROM sinalizada")
-    results.append(check(f"recall de {recall:.1%}", recall >= 0.80, "-- meta: 80%"))
+    if expandiu > 0 and changed < len(original) * 0.001:
+        print(f"  recall de {recall:.1%} sobre apenas {changed} bytes -- sem "
+              "significado: o tradutor expandiu em vez de editar no lugar")
+    else:
+        results.append(check(f"recall de {recall:.1%}", recall >= 0.80, "-- meta: 80%"))
 
     print("\n4. alfabeto deduzido")
     guess = guess_alphabet(original, regions)
